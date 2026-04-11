@@ -1,93 +1,18 @@
-name: AI全流程自动化
-on:
-  issue_comment:
-    types: [created]
-  workflow_dispatch:
-
+name: GitHub Actions Demo
+run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
+on: [push]
 jobs:
-  ai-dev:
-    runs-on: ubuntu-latest
-    if: github.event.comment.body == '/ai-dev'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '22'
-
-      - name: Install OpenClaw
-        run: |
-          curl -fsSL https://openclaw.ai/install.sh | bash
-
-      - name: 执行AI开发流程
-        run: |
-          # 获取用户需求（从Issue描述中提取）
-          ISSUE_BODY=$(gh issue view ${{ github.event.issue.number }} --json body --jq '.body')
-
-          # 调用orchestrator Agent
-          openclaw agent \
-            --agent orchestrator \
-            --message "执行AI开发流程，需求：\n\n${ISSUE_BODY}" \
-            --json \
-            > ai-dev-report.json
-
-      - name: 生成执行报告
-        run: |
-          node << 'EOF'
-          const fs = require('fs');
-          const report = JSON.parse(fs.readFileSync('ai-dev-report.json', 'utf8'));
-
-          const markdown = `## 🤖 AI开发流程执行报告
-
-          ${report.steps.map((step, index) => `
-          ### ${index + 1}. ${step.name} ${step.status === 'success' ? '✅' : '❌'}
-          - 耗时：${step.duration}
-          - 输出：${step.output}
-          ${step.error ? `- 错误：${step.error}` : ''}
-          `).join('\n')}
-
-          ${report.status === 'completed' ? '## 🎉 流程完成' : '## ⏸️ 等待人工审核'}
-
-          请审核以下内容：
-          ${report.review_items.map(item => `- [${item.name}](${item.url})`).join('\n')}
-
-          审核通过后，回复 \`/approve\`
-          审核不通过，回复 \`/modify [原因]\`
-          `;
-
-          fs.writeFileSync('report.md', markdown);
-          EOF
-
-      - name: Comment report
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync('report.md', 'utf8');
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: report
-            });
-
-  approve:
-    runs-on: ubuntu-latest
-    if: github.event.comment.body == '/approve'
-    steps:
-      - name: Approve deployment
-        run: |
-          echo "✅ 人工审核通过，部署已上线"
-
-  modify:
-    runs-on: ubuntu-latest
-    if: startsWith(github.event.comment.body, '/modify')
-    steps:
-      - name: Modify and retry
-        run: |
-          REASON="${{ github.event.comment.body }}"
-          echo "❌ 审核不通过，原因：${REASON}"
-          echo "返回对应步骤修改..."
+  Explore-GitHub-Actions:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+      - name: Check out repository code
+        uses: actions/checkout@v5
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
+      - name: List files in the repository
+        run: |
+          ls ${{ github.workspace }}
+      - run: echo "🍏 This job's status is ${{ job.status }}."
