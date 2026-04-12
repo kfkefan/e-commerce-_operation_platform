@@ -22,12 +22,24 @@
         <el-card class="task-list-card">
           <template #header>
             <div class="card-header">
-              <span>任务列表</span>
+              <div class="header-left">
+                <span>任务列表</span>
+                <el-tag 
+                  v-if="hasRunningTasks" 
+                  type="warning" 
+                  size="small" 
+                  effect="plain"
+                  class="auto-refresh-tag"
+                >
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  自动刷新中
+                </el-tag>
+              </div>
               <el-button
                 type="primary"
                 size="small"
                 :loading="loadingList"
-                @click="loadTaskList"
+                @click="loadTaskList(true)"
               >
                 刷新
               </el-button>
@@ -71,8 +83,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue';
 import { ElMessage } from 'element-plus';
+import { Loading } from '@element-plus/icons-vue';
 import TaskInput from '../components/TaskInput.vue';
 import TaskProgress from '../components/TaskProgress.vue';
 import ResultTable from '../components/ResultTable.vue';
@@ -91,17 +104,74 @@ const currentResults = ref<RankingResult[]>([]);
 const loadingResults = ref(false);
 const showResults = ref(false);
 
+// 自动刷新控制
+const autoRefreshInterval = ref<NodeJS.Timeout | null>(null);
+const REFRESH_INTERVAL = 3000; // 3 秒刷新一次
+
+// 检查是否有运行中的任务（pending 或 running 状态）
+const hasRunningTasks = computed(() => {
+  return taskList.value.some(task => 
+    task.status === 'running' || task.status === 'pending'
+  );
+});
+
+// 检查当前任务是否已完成
+const isCurrentTaskCompleted = computed(() => {
+  return currentTask.value?.status === 'completed' || 
+         currentTask.value?.status === 'failed' || 
+         currentTask.value?.status === 'cancelled';
+});
+
 // 加载任务列表
-const loadTaskList = async () => {
+const loadTaskList = async (showMessage: boolean = false) => {
   loadingList.value = true;
   
   try {
-    const response = await getTaskList({ page: 1, pageSize: 10 });
+    const response = await getTaskList({ page: 1, pageSize: 5 });
+    const oldList = taskList.value;
     taskList.value = response.tasks;
+    
+    // 只有当前任务未完成时才同步更新详情
+    if (currentTask.value && !isCurrentTaskCompleted.value) {
+      const updatedTask = response.tasks.find(t => t.taskId === currentTask.value?.taskId);
+      if (updatedTask && updatedTask.status !== currentTask.value.status) {
+        await loadTaskDetail(currentTask.value.taskId);
+      }
+    }
+    
+    // 检测任务状态变化（仅在有运行中任务时提示）
+    if (showMessage && oldList.length > 0 && hasRunningTasks.value) {
+      const completedCount = response.tasks.filter(t => t.status === 'completed').length - 
+                            oldList.filter(t => t.status === 'completed').length;
+      if (completedCount > 0) {
+        ElMessage.success(`有 ${completedCount} 个任务已完成`);
+      }
+    }
   } catch (error: any) {
-    ElMessage.error('加载任务列表失败');
+    if (showMessage) {
+      ElMessage.error('加载任务列表失败');
+    }
   } finally {
     loadingList.value = false;
+  }
+};
+
+// 启动自动刷新
+const startAutoRefresh = () => {
+  stopAutoRefresh(); // 先停止之前的
+  
+  autoRefreshInterval.value = setInterval(() => {
+    if (hasRunningTasks.value) {
+      loadTaskList(false); // 静默刷新
+    }
+  }, REFRESH_INTERVAL);
+};
+
+// 停止自动刷新
+const stopAutoRefresh = () => {
+  if (autoRefreshInterval.value) {
+    clearInterval(autoRefreshInterval.value);
+    autoRefreshInterval.value = null;
   }
 };
 
@@ -119,8 +189,8 @@ const loadTaskDetail = async (taskId: string) => {
     const detail = await getTaskDetail(taskId);
     currentTask.value = detail;
     
-    // 如果任务已完成，自动加载结果
-    if (detail.status === 'completed') {
+    // 如果任务已完成且尚未显示结果，自动加载结果
+    if (detail.status === 'completed' && !showResults.value) {
       await loadTaskResults(taskId);
     }
   } catch (error: any) {
@@ -152,13 +222,18 @@ const handleViewResults = async () => {
 const loadTaskResults = async (taskId: string) => {
   loadingResults.value = true;
   showResults.value = true;
+  currentResults.value = [];  // 清空旧数据
   
   try {
     const response = await getTaskResults(taskId);
-    currentResults.value = response.results;
+    currentResults.value = response.results || [];
+    
+    // 确保加载状态被正确清除
+    setTimeout(() => {
+      loadingResults.value = false;
+    }, 100);
   } catch (error: any) {
-    ElMessage.error('加载任务结果失败');
-  } finally {
+    ElMessage.error('加载任务结果失败：' + (error.message || '未知错误'));
     loadingResults.value = false;
   }
 };
@@ -207,6 +282,12 @@ const formatDate = (dateString: string) => {
 // 生命周期
 onMounted(() => {
   loadTaskList();
+  startAutoRefresh(); // 启动自动刷新
+});
+
+// 组件卸载时清理
+onUnmounted(() => {
+  stopAutoRefresh();
 });
 </script>
 
@@ -223,5 +304,15 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auto-refresh-tag {
+  margin-left: 8px;
 }
 </style>

@@ -19,7 +19,7 @@
       border
       stripe
       :default-sort="{ prop: 'keyword', order: 'ascending' }"
-      v-loading="loading"
+      v-loading="props.loading"
     >
       <!-- 关键词 -->
       <el-table-column
@@ -135,8 +135,7 @@ const props = defineProps<{
   loading?: boolean;
 }>();
 
-// 加载状态
-const loading = ref(props.loading || false);
+// 使用 props 的 loading，不要覆盖
 
 // 统计信息
 const stats = computed(() => {

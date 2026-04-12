@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, onUnmounted } from 'vue';
 import type { TaskDetail } from '../types';
 import { cancelTask as apiCancelTask } from '../api/tasks';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -100,25 +100,50 @@ const emit = defineEmits<{
 // 取消状态
 const cancelling = ref(false);
 
-// 监听任务变化，自动刷新
-watch(
-  () => props.task,
-  (newTask) => {
-    if (newTask && (newTask.status === 'running' || newTask.status === 'pending')) {
-      // 运行中的任务定期刷新
-      const interval = setInterval(async () => {
-        if (newTask.status !== 'running' && newTask.status !== 'pending') {
-          clearInterval(interval);
-          return;
-        }
+// 自动刷新定时器
+let refreshInterval: NodeJS.Timeout | null = null;
+
+// 启动自动刷新（仅当任务运行中）
+const startAutoRefresh = () => {
+  stopAutoRefresh(); // 先停止之前的
+  
+  if (props.task && (props.task.status === 'running' || props.task.status === 'pending')) {
+    refreshInterval = setInterval(() => {
+      // 每次都检查最新状态
+      if (props.task && (props.task.status === 'running' || props.task.status === 'pending')) {
         emit('refresh');
-      }, 5000);
-      
-      return () => clearInterval(interval);
+      } else {
+        stopAutoRefresh();
+      }
+    }, 5000);
+  }
+};
+
+// 停止自动刷新
+const stopAutoRefresh = () => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+  }
+};
+
+// 监听任务变化，启动/停止自动刷新
+watch(
+  () => props.task?.status,
+  (newStatus) => {
+    if (newStatus === 'running' || newStatus === 'pending') {
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
     }
   },
   { immediate: true }
 );
+
+// 组件卸载时清理
+onUnmounted(() => {
+  stopAutoRefresh();
+});
 
 // 获取状态类型
 const getStatusType = (status: string) => {
