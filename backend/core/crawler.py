@@ -1,6 +1,6 @@
 """
 Playwright 异步爬虫核心 - 增强反爬版本
-提供亚马逊页面爬取功能，集成 stealth 反检测
+提供亚马逊页面爬取功能，集成 stealth 反检测和第三方 API 支持
 """
 import asyncio
 import logging
@@ -15,6 +15,7 @@ from playwright_stealth import stealth_async
 from backend.config import settings
 from backend.core.ua_rotator import get_ua_rotator
 from backend.core.proxy_manager import get_proxy_pool
+from backend.services.third_party_api import get_third_party_service, ThirdPartyAPIResult
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +230,7 @@ class AmazonCrawler:
         semaphore: asyncio.Semaphore
     ) -> CrawlResult:
         """
-        爬取单个关键词的排名 - 增强反爬版本
+        爬取单个关键词的排名 - 增强反爬版本（支持第三方 API）
         
         核心反爬策略：
         1. 使用 stealth_async 隐藏自动化特征
@@ -237,126 +238,195 @@ class AmazonCrawler:
         3. 随机延迟模拟人类行为
         4. 验证码检测与处理
         5. 降低并发避免被封
+        6. 支持第三方 API（DataForSEO, SerpApi, ScraperAPI）
         """
         async with semaphore:
             result = CrawlResult(keyword=keyword)
-            browser = None
-            context = None
-            page = None
             
-            try:
-                async with async_playwright() as p:
-                    # 1. 启动浏览器 - 增强反爬参数
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        args=[
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-dev-shm-usage',
-                            '--disable-accelerated-2d-canvas',
-                            '--no-first-run',
-                            '--no-zygote',
-                            '--disable-gpu',
-                            '--disable-blink-features=AutomationControlled',
-                        ]
-                    )
-                    
-                    # 2. 创建上下文 - 模拟真实用户环境
-                    context = await browser.new_context(
-                        viewport={'width': 1920, 'height': 1080},
-                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        locale='en-US',
-                        timezone_id='America/New_York',  # 美国时区
-                        proxy={"server": self.proxy_pool.get_proxy()} if self.proxy_pool.is_enabled else None,
-                    )
-                    
-                    page = await context.new_page()
-                    
-                    # 3. 【关键步骤】应用 Stealth 插件
-                    # 自动处理 navigator.webdriver, WebGL, Chrome Runtime 等指纹
-                    await stealth_async(page)
-                    
-                    logger.info(f"开始爬取：{keyword} (ASIN: {asin})")
-                    
-                    # 4. 遍历页面
-                    for page_num in range(1, max_pages + 1):
-                        url = self._build_search_url(site, keyword, page_num)
-                        logger.debug(f"爬取：{url}")
-                        
-                        # 访问页面
-                        try:
-                            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                            await self.random_delay(2, 4)  # 页面加载后随机延迟
-                        except PlaywrightTimeout:
-                            logger.warning(f"页面加载超时：{url}")
-                            result.status = "error"
-                            result.error = "页面加载超时"
-                            break
-                        except Exception as e:
-                            logger.error(f"页面访问失败：{e}")
-                            result.status = "error"
-                            result.error = str(e)
-                            break
-                        
-                        # 5. 验证码检测
-                        if await self._is_captcha(page):
-                            logger.warning(f"检测到验证码：{keyword}")
-                            result.status = "captcha"
-                            result.error = "检测到验证码"
-                            break
-                        
-                        # 检查是否返回了 "No results found"
-                        page_content = await page.content()
-                        if "no results found" in page_content.lower():
-                            logger.info(f"无搜索结果：{keyword}")
-                            result.status = "not_found"
-                            break
-                        
-                        # 6. 解析排名
-                        page_result = await self._parse_rankings(page, asin, max_pages)
-                        
-                        # 检查是否有错误
-                        if page_result.status == "error":
-                            result.status = "error"
-                            result.error = page_result.error
-                            break
-                        
-                        # 检查是否找到排名
-                        if page_result.organic_position or page_result.ad_position:
-                            result.organic_page = page_result.organic_page
-                            result.organic_position = page_result.organic_position
-                            result.ad_page = page_result.ad_page
-                            result.ad_position = page_result.ad_position
-                            result.status = page_result.status
-                            break
-                        
-                        # 如果已经是最后一页且没找到
-                        if page_num >= max_pages:
-                            result.status = "not_found"
-                            break
-                        
-                        # 翻页前的随机延迟，模拟人类行为
-                        if page_num < max_pages:
-                            await self.random_delay(3, 6)
+            # ========== 策略 1: 使用第三方 API ==========
+            if settings.THIRD_PARTY_API_ENABLED:
+                logger.info(f"使用第三方 API 爬取：{keyword} (provider: {settings.THIRD_PARTY_PROVIDER})")
+                third_party_result = await self._crawl_with_third_party(asin, keyword, site, max_pages)
                 
+                # 如果第三方 API 成功，直接返回
+                if third_party_result.status in ["found", "not_found"]:
+                    logger.info(f"第三方 API 成功：{keyword} - {third_party_result.status}")
+                    return CrawlResult(
+                        keyword=keyword,
+                        organic_page=third_party_result.organic_page,
+                        organic_position=third_party_result.organic_position,
+                        ad_page=third_party_result.ad_page,
+                        ad_position=third_party_result.ad_position,
+                        status=third_party_result.status,
+                        error=third_party_result.error
+                    )
+                
+                # 如果第三方 API 失败且配置了回退，使用本地爬虫
+                if not settings.USE_THIRD_PARTY_FALLBACK:
+                    logger.warning(f"第三方 API 失败且未启用回退：{keyword}")
+                    return CrawlResult(
+                        keyword=keyword,
+                        status="error",
+                        error=f"第三方 API 失败：{third_party_result.error}"
+                    )
+                
+                logger.info(f"第三方 API 失败，回退到本地爬虫：{keyword}")
+            
+            # ========== 策略 2: 使用本地 Playwright 爬虫 ==========
+            logger.info(f"使用本地爬虫爬取：{keyword}")
+            return await self._crawl_with_playwright(asin, keyword, site, max_pages)
+    
+    async def _crawl_with_third_party(
+        self,
+        asin: str,
+        keyword: str,
+        site: str,
+        max_pages: int
+    ) -> ThirdPartyAPIResult:
+        """使用第三方 API 爬取"""
+        third_party_service = get_third_party_service()
+        
+        # 重试逻辑
+        for attempt in range(settings.THIRD_PARTY_MAX_RETRIES + 1):
+            try:
+                result = await third_party_service.search_rankings(asin, keyword, site, max_pages)
+                
+                if result.status != "error":
+                    return result
+                
+                if attempt < settings.THIRD_PARTY_MAX_RETRIES:
+                    logger.warning(f"第三方 API 第{attempt + 1}次失败，重试中...")
+                    await asyncio.sleep(2 ** attempt)  # 指数退避
+                    
             except Exception as e:
-                logger.error(f"爬取失败：{keyword}, 错误：{e}")
-                result.status = "error"
-                result.error = str(e)
-            
-            finally:
-                # 清理资源
-                try:
-                    if page:
-                        await page.close()
-                    if context:
-                        await context.close()
-                    if browser:
-                        await browser.close()
-                except Exception:
-                    pass
-            
-            return result
+                logger.error(f"第三方 API 异常：{e}")
+                if attempt >= settings.THIRD_PARTY_MAX_RETRIES:
+                    return ThirdPartyAPIResult(
+                        keyword=keyword,
+                        status="error",
+                        error=str(e)
+                    )
+        
+        return ThirdPartyAPIResult(
+            keyword=keyword,
+            status="error",
+            error="达到最大重试次数"
+        )
+    
+    async def _crawl_with_playwright(
+        self,
+        asin: str,
+        keyword: str,
+        site: str,
+        max_pages: int,
+    ) -> CrawlResult:
+        """使用本地 Playwright 爬虫"""
+        browser = None
+        context = None
+        page = None
+        result = CrawlResult(keyword=keyword)
+        
+        try:
+            async with async_playwright() as p:
+                # 1. 启动浏览器 - 增强反爬参数
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--disable-gpu',
+                        '--disable-blink-features=AutomationControlled',
+                    ]
+                )
+                
+                # 2. 创建上下文 - 模拟真实用户环境
+                context = await browser.new_context(
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    locale='en-US',
+                    timezone_id='America/New_York',
+                    proxy={"server": self.proxy_pool.get_proxy()} if self.proxy_pool.is_enabled else None,
+                )
+                
+                page = await context.new_page()
+                await stealth_async(page)
+                
+                logger.info(f"开始爬取：{keyword} (ASIN: {asin})")
+                
+                # 3. 遍历页面
+                for page_num in range(1, max_pages + 1):
+                    url = self._build_search_url(site, keyword, page_num)
+                    logger.debug(f"爬取：{url}")
+                    
+                    try:
+                        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        await self.random_delay(2, 4)
+                    except PlaywrightTimeout:
+                        logger.warning(f"页面加载超时：{url}")
+                        result.status = "error"
+                        result.error = "页面加载超时"
+                        break
+                    except Exception as e:
+                        logger.error(f"页面访问失败：{e}")
+                        result.status = "error"
+                        result.error = str(e)
+                        break
+                    
+                    if await self._is_captcha(page):
+                        logger.warning(f"检测到验证码：{keyword}")
+                        result.status = "captcha"
+                        result.error = "检测到验证码"
+                        break
+                    
+                    page_content = await page.content()
+                    if "no results found" in page_content.lower():
+                        logger.info(f"无搜索结果：{keyword}")
+                        result.status = "not_found"
+                        break
+                    
+                    page_result = await self._parse_rankings(page, asin, max_pages)
+                    
+                    if page_result.status == "error":
+                        result.status = "error"
+                        result.error = page_result.error
+                        break
+                    
+                    if page_result.organic_position or page_result.ad_position:
+                        result.organic_page = page_result.organic_page
+                        result.organic_position = page_result.organic_position
+                        result.ad_page = page_result.ad_page
+                        result.ad_position = page_result.ad_position
+                        result.status = page_result.status
+                        break
+                    
+                    if page_num >= max_pages:
+                        result.status = "not_found"
+                        break
+                    
+                    if page_num < max_pages:
+                        await self.random_delay(3, 6)
+        
+        except Exception as e:
+            logger.error(f"爬取失败：{keyword}, 错误：{e}")
+            result.status = "error"
+            result.error = str(e)
+        
+        finally:
+            try:
+                if page:
+                    await page.close()
+                if context:
+                    await context.close()
+                if browser:
+                    await browser.close()
+            except Exception:
+                pass
+        
+        return result
     
     async def crawl_keywords_batch(
         self,

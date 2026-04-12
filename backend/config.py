@@ -44,6 +44,28 @@ class Settings(BaseSettings):
     # ========== User-Agent 配置 ==========
     UA_ROTATION_ENABLED: bool = Field(default=True, description="是否启用 UA 轮换")
     
+    # ========== 第三方 API 配置 ==========
+    THIRD_PARTY_API_ENABLED: bool = Field(default=False, description="是否启用第三方 API（如 DataForSEO, SerpApi）")
+    THIRD_PARTY_PROVIDER: str = Field(default="dataforseo", description="第三方 API 提供商：dataforseo|serpapi|scraperapi")
+    
+    # DataForSEO 配置
+    DATAFORSEO_LOGIN: str = Field(default="", description="DataForSEO 登录邮箱")
+    DATAFORSEO_PASSWORD: str = Field(default="", description="DataForSEO API 密码")
+    DATAFORSEO_API_URL: str = Field(default="https://api.dataforseo.com/v3", description="DataForSEO API 基础 URL")
+    
+    # SerpApi 配置
+    SERPAPI_API_KEY: str = Field(default="", description="SerpApi API 密钥")
+    SERPAPI_API_URL: str = Field(default="https://serpapi.com/search", description="SerpApi API 基础 URL")
+    
+    # ScraperAPI 配置
+    SCRAPERAPI_API_KEY: str = Field(default="", description="ScraperAPI API 密钥")
+    SCRAPERAPI_API_URL: str = Field(default="http://api.scraperapi.com", description="ScraperAPI API 基础 URL")
+    
+    # 第三方 API 使用策略
+    USE_THIRD_PARTY_FALLBACK: bool = Field(default=True, description="本地爬虫失败时是否回退到第三方 API")
+    THIRD_PARTY_TIMEOUT: int = Field(default=30000, description="第三方 API 请求超时（毫秒）")
+    THIRD_PARTY_MAX_RETRIES: int = Field(default=2, description="第三方 API 最大重试次数")
+    
     # ========== 日志配置 ==========
     LOG_LEVEL: str = Field(default="INFO", description="日志级别")
     LOG_FILE: str = Field(default="logs/app.log", description="日志文件路径")
