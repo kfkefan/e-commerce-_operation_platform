@@ -60,8 +60,6 @@ class AmazonCrawler:
     def __init__(self):
         self.ua_rotator = get_ua_rotator()
         self.proxy_pool = get_proxy_pool()
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
     
     async def random_delay(self, min_seconds: float = None, max_seconds: float = None) -> None:
         """随机延迟"""
@@ -78,39 +76,8 @@ class AmazonCrawler:
         encoded_keyword = quote(keyword)
         return f"{base_url}/s?k={encoded_keyword}&page={page}"
     
-    async def _create_browser_context(self, use_proxy: bool = True) -> BrowserContext:
-        """创建浏览器上下文"""
-        if not self.browser:
-            raise RuntimeError("浏览器未初始化")
-        
-        # 获取 UA
-        ua = self.ua_rotator.get_next_ua() if settings.UA_ROTATION_ENABLED else None
-        
-        # 获取代理
-        proxy = None
-        if use_proxy and self.proxy_pool.is_enabled:
-            proxy = self.proxy_pool.get_proxy()
-            if proxy:
-                logger.debug(f"使用代理：{proxy}")
-        
-        # 构建上下文选项
-        context_options = {
-            'user_agent': ua,
-            'viewport': {'width': 1920, 'height': 1080},
-            'locale': 'en-US',
-            'timezone_id': 'America/New_York',
-            'bypass_csp': True,
-            'java_script_enabled': True,
-        }
-        
-        if proxy:
-            context_options['proxy'] = {'server': proxy}
-        
-        return await self.browser.new_context(**context_options)
-    
     async def _is_captcha(self, page: Page) -> bool:
         """检测是否遇到验证码"""
-        # 检查验证码相关元素
         captcha_indicators = [
             'input[type="captcha"]',
             '[data-a-modal*="captcha"]',
@@ -122,7 +89,6 @@ class AmazonCrawler:
             if await page.query_selector(selector):
                 return True
         
-        # 检查页面文本
         page_text = await page.content()
         if 'captcha' in page_text.lower() or 'verification' in page_text.lower():
             return True
@@ -133,28 +99,17 @@ class AmazonCrawler:
         """解析页面排名"""
         asin_upper = asin.upper()
         
-        # 等待搜索结果加载
         try:
             await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=15000)
         except PlaywrightTimeout:
             logger.warning("搜索结果加载超时")
-            return CrawlResult(
-                keyword="",
-                status="error",
-                error="搜索结果加载超时"
-            )
+            return CrawlResult(keyword="", status="error", error="搜索结果加载超时")
         
-        # 检查是否被重定向到验证码页面
         current_url = page.url
         if 'captcha' in current_url.lower() or 'validation' in current_url.lower():
             logger.warning("检测到验证码重定向")
-            return CrawlResult(
-                keyword="",
-                status="captcha",
-                error="检测到验证码"
-            )
+            return CrawlResult(keyword="", status="captcha", error="检测到验证码")
         
-        # 获取所有搜索结果
         results = await page.query_selector_all('[data-component-type="s-search-result"]')
         logger.info(f"找到 {len(results)} 个搜索结果")
         
@@ -163,13 +118,10 @@ class AmazonCrawler:
         ad_page = None
         ad_position = None
         
-        # 查找自然排名
         for idx, result in enumerate(results):
             try:
-                # 获取 ASIN
                 asin_attr = await result.get_attribute('data-asin')
                 if not asin_attr:
-                    # 尝试从链接中提取
                     link = await result.query_selector('a.a-link-normal')
                     if link:
                         href = await link.get_attribute('href')
@@ -185,7 +137,6 @@ class AmazonCrawler:
                 logger.debug(f"解析结果项失败：{e}")
                 continue
         
-        # 查找广告排名
         try:
             sponsored_results = await page.query_selector_all('[data-component-type="s-search-result"][data-ad-sponsored="true"]')
             for idx, ad in enumerate(sponsored_results):
@@ -198,7 +149,6 @@ class AmazonCrawler:
         except Exception as e:
             logger.debug(f"查找广告排名失败：{e}")
         
-        # 确定状态
         if organic_page and ad_page:
             status = "found"
         elif organic_page:
@@ -225,26 +175,16 @@ class AmazonCrawler:
         max_pages: int,
         semaphore: asyncio.Semaphore
     ) -> CrawlResult:
-        """
-        爬取单个关键词的排名
-        
-        Args:
-            asin: 产品 ASIN
-            keyword: 关键词
-            site: 亚马逊站点
-            max_pages: 最大翻页数
-            semaphore: 信号量用于并发控制
-        
-        Returns:
-            爬取结果
-        """
+        """爬取单个关键词的排名"""
         async with semaphore:
             result = CrawlResult(keyword=keyword)
+            browser = None
+            context = None
+            page = None
             
             try:
-                # 创建浏览器
                 async with async_playwright() as p:
-                    self.browser = await p.chromium.launch(
+                    browser = await p.chromium.launch(
                         headless=True,
                         args=[
                             '--disable-blink-features=AutomationControlled',
@@ -252,87 +192,61 @@ class AmazonCrawler:
                             '--disable-dev-shm-usage',
                             '--disable-gpu',
                             '--disable-extensions',
-                            '--disable-software-rasterizer',
-                            '--disable-setuid-sandbox',
                         ]
                     )
                     
-                    context = await self._create_browser_context(use_proxy=False)
-                    page = None
+                    context = await browser.new_context(
+                        viewport={'width': 1920, 'height': 1080},
+                        locale='en-US',
+                        timezone_id='America/New_York',
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    )
                     
-                    try:
-                        page = await context.new_page()
+                    page = await context.new_page()
+                    await stealth_async(page)
+                    
+                    for page_num in range(1, max_pages + 1):
+                        url = self._build_search_url(site, keyword, page_num)
+                        logger.debug(f"爬取：{url}")
                         
-                        # 应用 stealth 反检测
-                        await stealth_async(page)
+                        try:
+                            await page.goto(url, wait_until='networkidle', timeout=60000)
+                            await self.random_delay(2, 4)
+                        except PlaywrightTimeout:
+                            logger.warning(f"页面加载超时：{url}")
+                            result.status = "error"
+                            result.error = "页面加载超时"
+                            break
+                        except Exception as e:
+                            logger.error(f"页面访问失败：{e}")
+                            result.status = "error"
+                            result.error = str(e)
+                            break
                         
-                        # 遍历页面
-                        for page_num in range(1, max_pages + 1):
-                            url = self._build_search_url(site, keyword, page_num)
-                            logger.debug(f"爬取：{url}")
-                            
-                            # 访问页面
-                            try:
-                                await page.goto(url, wait_until='networkidle', timeout=60000)
-                                await self.random_delay(2, 4)  # 页面加载后延迟
-                            except PlaywrightTimeout:
-                                logger.warning(f"页面加载超时：{url}")
-                                result.status = "error"
-                                result.error = "页面加载超时"
-                                break
-                            
-                            # 检查验证码
-                            if await self._is_captcha(page):
-                                logger.warning(f"检测到验证码：{keyword}")
-                                result.status = "captcha"
-                                result.error = "检测到验证码"
-                                break
-                            
-                            # 解析排名
-                            page_result = await self._parse_rankings(page, asin, max_pages)
-                            
-                            # 检查是否有错误
-                            if page_result.status == "error":
-                                result.status = "error"
-                                result.error = page_result.error
-                                break
-                            
-                            # 检查是否找到排名
-                            if page_result.organic_position or page_result.ad_position:
-                                # 找到排名
-                                result.organic_page = page_result.organic_page
-                                result.organic_position = page_result.organic_position
-                                result.ad_page = page_result.ad_page
-                                result.ad_position = page_result.ad_position
-                                result.status = page_result.status
-                                break
-                            
-                            # 如果已经是最后一页且没找到，设置为 not_found
-                            if page_num >= max_pages:
-                                result.status = "not_found"
-                                break
-                            
-                            # 随机延迟后继续下一页
-                            if page_num < max_pages:
-                                await self.random_delay()
-                    
-                    except Exception as e:
-                        logger.error(f"爬取异常：{keyword}, 错误：{e}")
-                        result.status = "error"
-                        result.error = str(e)
-                    
-                    finally:
-                        # 清理资源
-                        if page:
-                            try:
-                                await page.close()
-                            except Exception:
-                                pass
-                        if context:
-                            try:
-                                await context.close()
-                            except Exception:
-                                pass
+                        if await self._is_captcha(page):
+                            logger.warning(f"检测到验证码：{keyword}")
+                            result.status = "captcha"
+                            result.error = "检测到验证码"
+                            break
+                        
+                        page_result = await self._parse_rankings(page, asin, max_pages)
+                        
+                        if page_result.status == "error":
+                            result.status = "error"
+                            result.error = page_result.error
+                            break
+                        
+                        if page_result.organic_position or page_result.ad_position:
+                            result.organic_page = page_result.organic_page
+                            result.organic_position = page_result.organic_position
+                            result.ad_page = page_result.ad_page
+                            result.ad_position = page_result.ad_position
+                            result.status = page_result.status
+                            break
+                        
+                        if page_num >= max_pages:
+                            result.status = "not_found"
+                            break
                 
             except Exception as e:
                 logger.error(f"爬取失败：{keyword}, 错误：{e}")
@@ -340,13 +254,15 @@ class AmazonCrawler:
                 result.error = str(e)
             
             finally:
-                # 确保浏览器关闭
-                if self.browser:
-                    try:
-                        await self.browser.close()
-                    except Exception:
-                        pass
-                self.browser = None
+                try:
+                    if page:
+                        await page.close()
+                    if context:
+                        await context.close()
+                    if browser:
+                        await browser.close()
+                except Exception:
+                    pass
             
             return result
     
@@ -358,19 +274,7 @@ class AmazonCrawler:
         max_pages: int,
         max_concurrent: int = 3
     ) -> list:
-        """
-        批量爬取多个关键词
-        
-        Args:
-            asin: 产品 ASIN
-            keywords: 关键词列表
-            site: 亚马逊站点
-            max_pages: 最大翻页数
-            max_concurrent: 最大并发数
-        
-        Returns:
-            爬取结果列表
-        """
+        """批量爬取多个关键词"""
         semaphore = asyncio.Semaphore(max_concurrent)
         
         tasks = [
@@ -380,7 +284,6 @@ class AmazonCrawler:
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # 处理异常
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -396,7 +299,6 @@ class AmazonCrawler:
         return processed_results
 
 
-# 全局爬虫实例
 crawler = AmazonCrawler()
 
 

@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # ========== CORS 配置 ==========
     CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:5173"],
+        default=["http://localhost:3000", "http://localhost:5173", "http://localhost", "http://localhost:80", "*"],
         description="允许的 CORS 源"
     )
     
