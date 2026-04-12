@@ -1,0 +1,250 @@
+# ASIN Ranker CI 流程
+# GitHub Actions Workflow for Continuous Integration
+
+name: CI - ASIN Ranker
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  PYTHON_VERSION: '3.10'
+  NODE_VERSION: '20'
+
+jobs:
+  # =====================
+  # 后端测试 (Python/FastAPI)
+  # =====================
+  backend-test:
+    name: Backend Test (Python)
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+          MYSQL_DATABASE: asin_ranker_test
+          MYSQL_USER: testuser
+          MYSQL_PASSWORD: testpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install system dependencies (Playwright)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 \
+            libnspr4 \
+            libatk1.0-0 \
+            libatk-bridge2.0-0 \
+            libcups2 \
+            libdrm2 \
+            libdbus-1-3 \
+            libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxfixes3 \
+            libxrandr2 \
+            libgbm1 \
+            libasound2
+      
+      - name: Install Python dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Install Playwright browsers
+        run: |
+          cd backend
+          playwright install chromium
+          playwright install-deps chromium
+      
+      - name: Run backend linter
+        run: |
+          cd backend
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+      
+      - name: Run backend tests
+        run: |
+          cd backend
+          pytest tests/ -v --tb=short --cov=. --cov-report=xml
+        env:
+          DB_HOST: localhost
+          DB_PORT: 3306
+          DB_USER: testuser
+          DB_PASSWORD: testpassword
+          DB_NAME: asin_ranker_test
+          DEBUG: true
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage.xml
+          fail_ci_if_error: false
+
+  # =====================
+  # 前端测试 (Vue 3)
+  # =====================
+  frontend-test:
+    name: Frontend Test (Vue 3)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+      
+      - name: Run linter
+        run: |
+          cd frontend
+          npm run lint || true
+      
+      - name: Run type check
+        run: |
+          cd frontend
+          npm run type-check || true
+      
+      - name: Run tests
+        run: |
+          cd frontend
+          npm run test -- --coverage
+      
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+          retention-days: 7
+
+  # =====================
+  # Docker 构建测试
+  # =====================
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build backend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: Dockerfile.backend
+          push: false
+          tags: asin-ranker-backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Build frontend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          dockerfile: ../Dockerfile.frontend
+          push: false
+          tags: asin-ranker-frontend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =====================
+  # Docker Compose 测试
+  # =====================
+  docker-compose-test:
+    name: Docker Compose Integration Test
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build all services
+        run: docker compose build
+      
+      - name: Start services
+        run: docker compose up -d
+      
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for MySQL to be healthy..."
+          for i in {1..30}; do
+            if docker compose exec -T mysql mysqladmin ping -h localhost > /dev/null 2>&1; then
+              echo "MySQL is healthy!"
+              break
+            fi
+            sleep 2
+          done
+          
+          echo "Waiting for backend to be healthy..."
+          for i in {1..30}; do
+            if curl -f http://localhost:8000/api/v1/health > /dev/null 2>&1; then
+              echo "Backend is healthy!"
+              break
+            fi
+            sleep 2
+          done
+      
+      - name: Run health checks
+        run: |
+          curl -f http://localhost:8000/api/v1/health
+          curl -f http://localhost/ || true
+      
+      - name: Show service status
+        run: docker compose ps
+      
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+      
+      - name: Stop services
+        if: always()
+        run: docker compose down

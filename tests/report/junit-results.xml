@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="23" failures="3" errors="0" time="12.925">
+    <testsuite name="tests/integration/crawler/amazonCrawler.test.ts" timestamp="2026-04-11T14:01:25.143Z" hostname="DESKTOP-HOHPERH" tests="23" failures="3" errors="0" skipped="0" time="11.662">
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该找到自然排名" time="0.225">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该找到广告排名" time="0.14">
+            <system-out>
+找到排名 - 关键词：wireless earbuds, 状态：found, 自然页：1, 广告页：1
+
+            </system-out>
+            <failure message="expected &apos;found&apos; to be &apos;ad_only&apos; // Object.is equality" type="AssertionError">
+AssertionError: expected &apos;found&apos; to be &apos;ad_only&apos; // Object.is equality
+
+- Expected
++ Received
+
+- ad_only
++ found
+
+ ❯ tests/integration/crawler/amazonCrawler.test.ts:137:29
+            </failure>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该同时找到自然排名和广告排名" time="0.122">
+            <system-out>
+找到排名 - 关键词：wireless earbuds, 状态：found, 自然页：1, 广告页：1
+
+            </system-out>
+            <failure message="expected 1 to be 2 // Object.is equality" type="AssertionError">
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ tests/integration/crawler/amazonCrawler.test.ts:157:38
+            </failure>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该返回未找到当 ASIN 不在搜索结果中" time="0.522">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该处理网络错误并重试" time="0.107">
+            <system-err>
+爬取失败 - 关键词：wireless earbuds, 页码：1 { code: [32m&apos;ETIMEDOUT&apos;[39m, message: [32m&apos;timeout&apos;[39m }
+
+            </system-err>
+            <failure message="expected &quot;spy&quot; to be called 3 times, but got 1 times" type="AssertionError">
+AssertionError: expected &quot;spy&quot; to be called 3 times, but got 1 times
+ ❯ tests/integration/crawler/amazonCrawler.test.ts:191:23
+            </failure>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该处理验证码页面" time="0.144">
+            <system-err>
+检测到验证码页面，暂停爬虫。关键词：wireless earbuds
+
+            </system-err>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该处理错误页面" time="0.278">
+            <system-err>
+检测到错误页面，重试。关键词：wireless earbuds, 页码：1
+
+检测到错误页面，重试。关键词：wireless earbuds, 页码：2
+
+            </system-err>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该处理请求超时" time="0.169">
+            <system-err>
+爬取失败 - 关键词：wireless earbuds, 页码：1 { code: [32m&apos;ETIMEDOUT&apos;[39m, message: [32m&apos;timeout&apos;[39m }
+
+            </system-err>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该处理 500 服务器错误" time="0.14">
+            <system-err>
+爬取失败 - 关键词：wireless earbuds, 页码：1 { response: { status: [33m500[39m }, message: [32m&apos;Internal Server Error&apos;[39m }
+
+            </system-err>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; searchAndExtractRank &gt; 应该支持不同亚马逊站点" time="0.656">
+            <system-out>
+找到排名 - 关键词：wireless earbuds, 状态：organic_only, 自然页：1, 广告页：null
+
+找到排名 - 关键词：wireless earbuds, 状态：organic_only, 自然页：1, 广告页：null
+
+找到排名 - 关键词：wireless earbuds, 状态：organic_only, 自然页：1, 广告页：null
+
+找到排名 - 关键词：wireless earbuds, 状态：organic_only, 自然页：1, 广告页：null
+
+            </system-out>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; pause/resume &gt; 应该暂停爬虫" time="0.001">
+            <system-out>
+爬虫已暂停
+
+            </system-out>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; pause/resume &gt; 应该继续爬虫" time="0.001">
+            <system-out>
+爬虫已暂停
+爬虫已继续
+
+            </system-out>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; pause/resume &gt; 应该清除暂停状态" time="0">
+            <system-out>
+爬虫已暂停
+
+            </system-out>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理空关键词" time="0.133">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理空 ASIN" time="0.141">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理 maxPages 为 0" time="0.001">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理大 maxPages 值" time="7.901">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理特殊字符关键词" time="0.122">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理 HTML 实体编码内容" time="0.173">
+            <system-out>
+找到排名 - 关键词：wireless earbuds, 状态：organic_only, 自然页：1, 广告页：null
+
+            </system-out>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理 malformed HTML" time="0.169">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理空响应" time="0.187">
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 边界条件测试 &gt; 应该处理 null 响应" time="0.144">
+            <system-err>
+爬取失败 - 关键词：wireless earbuds, 页码：1 Error: cheerio.load() expects a string
+    at Module.load [90m(file:///D:/OpenClaw/projects/orchestrator/[39mnode_modules/[4mcheerio[24m/src/load.ts:134:13[90m)[39m
+    at RankFinder.isCaptchaPage [90m(D:\OpenClaw\projects\orchestrator\[39msrc\crawler\rankFinder.ts:175:23[90m)[39m
+    at AmazonCrawler.searchAndExtractRank [90m(D:\OpenClaw\projects\orchestrator\[39msrc\crawler\amazonCrawler.ts:101:29[90m)[39m
+    at [90mD:\OpenClaw\projects\orchestrator\[39mtests\integration\crawler\amazonCrawler.test.ts:362:22
+    at runTest [90m(file:///D:/OpenClaw/projects/orchestrator/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:781:11[90m)[39m
+    at runSuite [90m(file:///D:/OpenClaw/projects/orchestrator/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///D:/OpenClaw/projects/orchestrator/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///D:/OpenClaw/projects/orchestrator/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///D:/OpenClaw/projects/orchestrator/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:958:5[90m)[39m
+    at startTests [90m(file:///D:/OpenClaw/projects/orchestrator/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:967:3[90m)[39m
+
+            </system-err>
+        </testcase>
+        <testcase classname="tests/integration/crawler/amazonCrawler.test.ts" name="AmazonCrawler Integration &gt; 性能测试 &gt; 应该在合理时间内完成单关键词搜索" time="0.182">
+            <system-out>
+找到排名 - 关键词：wireless earbuds, 状态：organic_only, 自然页：1, 广告页：null
+
+            </system-out>
+        </testcase>
+    </testsuite>
+</testsuites>
+s>

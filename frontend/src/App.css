@@ -1,0 +1,57 @@
+.app-layout {
+  min-height: 100vh;
+}
+
+.app-header {
+  background: #001529;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.app-title {
+  color: #fff;
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.app-subtitle {
+  color: rgba(255, 255, 255, 0.65);
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.app-content {
+  padding: 24px;
+  background: #f0f2f5;
+}
+
+.app-footer {
+  background: #001529;
+  text-align: center;
+  padding: 16px;
+}
+
+.app-footer p {
+  color: rgba(255, 255, 255, 0.65);
+  margin: 0;
+  font-size: 14px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .app-title {
+    font-size: 20px;
+  }
+
+  .app-subtitle {
+    font-size: 12px;
+  }
+
+  .app-content {
+    padding: 12px;
+  }
+}

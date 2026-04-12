@@ -1,0 +1,726 @@
+openapi: 3.0.3
+info:
+  title: ASIN Ranker API
+  description: |
+    ASIN 排名追踪器 API 接口文档
+    
+    提供亚马逊 ASIN 关键词排名追踪功能的 RESTful API。
+  version: 1.0.0
+  contact:
+    name: ASIN Ranker Support
+    email: support@asinranker.example.com
+
+servers:
+  - url: http://localhost:8000
+    description: 本地开发环境
+  - url: https://api.asinranker.example.com
+    description: 生产环境
+
+tags:
+  - name: Tasks
+    description: 任务管理相关接口
+  - name: Health
+    description: 健康检查接口
+
+paths:
+  /tasks:
+    post:
+      tags:
+        - Tasks
+      summary: 提交排名追踪任务
+      description: |
+        创建一个新的 ASIN 排名追踪任务。
+        
+        - 关键词数量：1-100 个
+        - 每个关键词长度：1-200 字符
+        - ASIN 格式：10 位字母数字
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+            examples:
+              basic:
+                summary: 基本请求示例
+                value:
+                  asin: "B08N5WRWNW"
+                  keywords:
+                    - "wireless earbuds"
+                    - "bluetooth headphones"
+                    - "noise cancelling earbuds"
+                  maxPages: 5
+                  site: "amazon.com"
+      responses:
+        '201':
+          description: 任务创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              examples:
+                success:
+                  summary: 成功响应
+                  value:
+                    taskId: "550e8400-e29b-41d4-a716-446655440000"
+                    status: "pending"
+                    createdAt: "2026-04-12T10:00:00Z"
+                    totalKeywords: 3
+                    maxPages: 5
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidAsin:
+                  summary: ASIN 格式错误
+                  value:
+                    code: "INVALID_ASIN"
+                    message: "ASIN 格式不正确，应为 10 位字母数字"
+                    details:
+                      field: "asin"
+                      value: "INVALID123!"
+                noKeywords:
+                  summary: 关键词为空
+                  value:
+                    code: "NO_KEYWORDS"
+                    message: "请至少输入一个关键词"
+                    details:
+                      field: "keywords"
+                      value: []
+        '429':
+          description: 请求频率超限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "RATE_LIMITED"
+                message: "请求频率超限，请稍后重试"
+                details:
+                  retryAfter: 60
+
+    get:
+      tags:
+        - Tasks
+      summary: 获取任务列表
+      description: |
+        获取当前用户的所有任务列表，支持分页和状态筛选。
+      operationId: listTasks
+      parameters:
+        - name: status
+          in: query
+          description: 按任务状态筛选
+          required: false
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+        - name: page
+          in: query
+          description: 页码（从 1 开始）
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          description: 每页数量
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: 成功返回任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+              example:
+                tasks:
+                  - taskId: "550e8400-e29b-41d4-a716-446655440000"
+                    status: "completed"
+                    createdAt: "2026-04-12T10:00:00Z"
+                    completedAt: "2026-04-12T10:05:00Z"
+                    totalKeywords: 10
+                    processedKeywords: 10
+                  - taskId: "660e8400-e29b-41d4-a716-446655440001"
+                    status: "running"
+                    createdAt: "2026-04-12T10:10:00Z"
+                    totalKeywords: 5
+                    processedKeywords: 3
+                pagination:
+                  page: 1
+                  pageSize: 20
+                  total: 2
+                  totalPages: 1
+
+  /tasks/{taskId}:
+    get:
+      tags:
+        - Tasks
+      summary: 查询任务状态
+      description: |
+        获取指定任务的详细状态信息。
+      operationId: getTask
+      parameters:
+        - name: taskId
+          in: path
+          description: 任务 ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+              example:
+                taskId: "550e8400-e29b-41d4-a716-446655440000"
+                status: "running"
+                createdAt: "2026-04-12T10:00:00Z"
+                updatedAt: "2026-04-12T10:03:00Z"
+                asin: "B08N5WRWNW"
+                site: "amazon.com"
+                maxPages: 5
+                totalKeywords: 10
+                processedKeywords: 6
+                progress: 60
+        '404':
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "TASK_NOT_FOUND"
+                message: "指定的任务不存在"
+                details:
+                  taskId: "550e8400-e29b-41d4-a716-446655440000"
+
+    delete:
+      tags:
+        - Tasks
+      summary: 取消任务
+      description: |
+        取消正在执行或等待执行的任务。
+        
+        - 仅支持取消状态为 pending 或 running 的任务
+        - 已完成或已取消的任务无法再次取消
+      operationId: cancelTask
+      parameters:
+        - name: taskId
+          in: path
+          description: 任务 ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 任务取消成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              example:
+                taskId: "550e8400-e29b-41d4-a716-446655440000"
+                status: "cancelled"
+                createdAt: "2026-04-12T10:00:00Z"
+                totalKeywords: 10
+                maxPages: 5
+        '400':
+          description: 任务无法取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "CANNOT_CANCEL"
+                message: "任务已完成或已失败，无法取消"
+                details:
+                  taskId: "550e8400-e29b-41d4-a716-446655440000"
+                  currentStatus: "completed"
+        '404':
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /tasks/{taskId}/results:
+    get:
+      tags:
+        - Tasks
+      summary: 获取任务结果
+      description: |
+        获取指定任务的排名结果数据。
+        
+        - 仅当任务状态为 completed 时返回完整结果
+        - 任务状态为 running 时返回已处理的部分结果
+      operationId: getTaskResults
+      parameters:
+        - name: taskId
+          in: path
+          description: 任务 ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回任务结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResultsResponse'
+              example:
+                taskId: "550e8400-e29b-41d4-a716-446655440000"
+                asin: "B08N5WRWNW"
+                site: "amazon.com"
+                completedAt: "2026-04-12T10:05:00Z"
+                results:
+                  - keyword: "wireless earbuds"
+                    organicPage: 3
+                    organicPosition: 12
+                    adPage: 1
+                    adPosition: 4
+                    status: "found"
+                    timestamp: "2026-04-12T10:02:00Z"
+                  - keyword: "bluetooth headphones"
+                    organicPage: null
+                    organicPosition: null
+                    adPage: 2
+                    adPosition: 8
+                    status: "organic_not_found"
+                    timestamp: "2026-04-12T10:03:00Z"
+                  - keyword: "noise cancelling earbuds"
+                    organicPage: 1
+                    organicPosition: 5
+                    adPage: null
+                    adPosition: null
+                    status: "ad_not_found"
+                    timestamp: "2026-04-12T10:04:00Z"
+        '404':
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: 任务尚未完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "TASK_NOT_COMPLETED"
+                message: "任务尚未完成，当前状态：running"
+                details:
+                  taskId: "550e8400-e29b-41d4-a716-446655440000"
+                  status: "running"
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: 健康检查
+      description: 检查 API 服务健康状态
+      operationId: healthCheck
+      responses:
+        '200':
+          description: 服务健康
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "healthy"
+                version: "1.0.0"
+                timestamp: "2026-04-12T10:00:00Z"
+                checks:
+                  database: "ok"
+                  crawler: "ok"
+
+components:
+  schemas:
+    # ========== 请求/响应模型 ==========
+    
+    TaskCreateRequest:
+      type: object
+      required:
+        - asin
+        - keywords
+      properties:
+        asin:
+          type: string
+          description: 产品 ASIN（10 位字母数字）
+          pattern: '^[a-zA-Z0-9]{10}$'
+          example: "B08N5WRWNW"
+        keywords:
+          type: array
+          description: 关键词列表
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            example: "wireless earbuds"
+        maxPages:
+          type: integer
+          description: 最大翻页数
+          minimum: 1
+          maximum: 50
+          default: 5
+          example: 5
+        site:
+          type: string
+          description: 亚马逊站点
+          enum:
+            - amazon.com
+            - amazon.co.uk
+            - amazon.de
+            - amazon.fr
+            - amazon.co.jp
+            - amazon.ca
+            - amazon.com.au
+          default: amazon.com
+          example: "amazon.com"
+
+    TaskResponse:
+      type: object
+      properties:
+        taskId:
+          type: string
+          format: uuid
+          description: 任务 ID
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        createdAt:
+          type: string
+          format: date-time
+          description: 任务创建时间
+        totalKeywords:
+          type: integer
+          description: 关键词总数
+        maxPages:
+          type: integer
+          description: 最大翻页数
+
+    TaskDetail:
+      type: object
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: 最后更新时间
+        asin:
+          type: string
+          description: 产品 ASIN
+        site:
+          type: string
+          description: 亚马逊站点
+        maxPages:
+          type: integer
+        totalKeywords:
+          type: integer
+        processedKeywords:
+          type: integer
+          description: 已处理的关键词数
+        progress:
+          type: integer
+          description: 进度百分比（0-100）
+        errorMessage:
+          type: string
+          description: 错误信息（如果有）
+
+    TaskListResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskListItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    TaskListItem:
+      type: object
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        totalKeywords:
+          type: integer
+        processedKeywords:
+          type: integer
+
+    TaskResultsResponse:
+      type: object
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        asin:
+          type: string
+        site:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RankingResult'
+
+    RankingResult:
+      type: object
+      properties:
+        keyword:
+          type: string
+          description: 关键词
+        organicPage:
+          type: integer
+          nullable: true
+          description: 自然排名页码（未找到为 null）
+        organicPosition:
+          type: integer
+          nullable: true
+          description: 自然排名页内位置（1-48，未找到为 null）
+        adPage:
+          type: integer
+          nullable: true
+          description: 广告排名页码（未找到为 null）
+        adPosition:
+          type: integer
+          nullable: true
+          description: 广告排名页内位置（1-4，未找到为 null）
+        status:
+          $ref: '#/components/schemas/RankingStatus'
+        timestamp:
+          type: string
+          format: date-time
+          description: 爬取时间
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          description: 当前页码
+        pageSize:
+          type: integer
+          description: 每页数量
+        total:
+          type: integer
+          description: 总记录数
+        totalPages:
+          type: integer
+          description: 总页数
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - unhealthy
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          properties:
+            database:
+              type: string
+              enum:
+                - ok
+                - error
+            crawler:
+              type: string
+              enum:
+                - ok
+                - error
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          description: 错误码
+        message:
+          type: string
+          description: 错误信息
+        details:
+          type: object
+          description: 详细错误信息
+          additionalProperties: true
+
+    # ========== 枚举类型 ==========
+    
+    TaskStatus:
+      type: string
+      description: |
+        任务状态枚举
+        
+        - `pending`: 等待执行
+        - `running`: 执行中
+        - `completed`: 已完成
+        - `failed`: 失败
+        - `cancelled`: 已取消
+      enum:
+        - pending
+        - running
+        - completed
+        - failed
+        - cancelled
+
+    RankingStatus:
+      type: string
+      description: |
+        排名结果状态枚举
+        
+        - `found`: 自然排名和广告排名都找到
+        - `organic_not_found`: 仅自然排名未找到
+        - `ad_not_found`: 仅广告排名未找到
+        - `not_found`: 自然排名和广告排名都未找到
+        - `error`: 爬取过程出错
+        - `captcha`: 遇到验证码
+      enum:
+        - found
+        - organic_not_found
+        - ad_not_found
+        - not_found
+        - error
+        - captcha
+
+  # ========== 错误码定义 ==========
+  
+  responses:
+    InvalidAsin:
+      description: ASIN 格式错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "INVALID_ASIN"
+            message: "ASIN 格式不正确，应为 10 位字母数字"
+            details:
+              field: "asin"
+              value: "INVALID123!"
+
+    NoKeywords:
+      description: 关键词为空
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "NO_KEYWORDS"
+            message: "请至少输入一个关键词"
+            details:
+              field: "keywords"
+              value: []
+
+    TaskNotFound:
+      description: 任务不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "TASK_NOT_FOUND"
+            message: "指定的任务不存在"
+            details:
+              taskId: "550e8400-e29b-41d4-a716-446655440000"
+
+    RateLimited:
+      description: 请求频率超限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "RATE_LIMITED"
+            message: "请求频率超限，请稍后重试"
+            details:
+              retryAfter: 60
+
+    CannotCancel:
+      description: 任务无法取消
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "CANNOT_CANCEL"
+            message: "任务已完成或已失败，无法取消"
+            details:
+              taskId: "550e8400-e29b-41d4-a716-446655440000"
+              currentStatus: "completed"
+
+    TaskNotCompleted:
+      description: 任务尚未完成
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "TASK_NOT_COMPLETED"
+            message: "任务尚未完成，当前状态：running"
+            details:
+              taskId: "550e8400-e29b-41d4-a716-446655440000"
+              status: "running"
+
+  # ========== 错误码汇总 ==========
+  
+  securitySchemes: {}
+
+# ========== 错误码字典 ==========
+# 
+# | 错误码 | HTTP 状态码 | 说明 |
+# |--------|------------|------|
+# | INVALID_ASIN | 400 | ASIN 格式不正确 |
+# | NO_KEYWORDS | 400 | 关键词列表为空 |
+# | KEYWORD_TOO_LONG | 400 | 单个关键词超过 200 字符 |
+# | TOO_MANY_KEYWORDS | 400 | 关键词超过 100 个 |
+# | INVALID_PAGE_COUNT | 400 | 翻页数超出 1-50 范围 |
+# | INVALID_SITE | 400 | 不支持的亚马逊站点 |
+# | TASK_NOT_FOUND | 404 | 指定的任务 ID 不存在 |
+# | CANNOT_CANCEL | 400 | 任务状态不允许取消 |
+# | TASK_NOT_COMPLETED | 400 | 任务尚未完成，无法获取完整结果 |
+# | RATE_LIMITED | 429 | 请求频率超限 |
+# | INTERNAL_ERROR | 500 | 服务器内部错误 |
+# | CRAWLER_ERROR | 503 | 爬虫服务暂时不可用 |

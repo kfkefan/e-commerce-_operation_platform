@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: asin-ranker-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: asin_ranker
+      MYSQL_USER: ${MYSQL_USER:-asinranker}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-asinranker123}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - asin-ranker-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 后端服务
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: asin-ranker-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:-asinranker}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-asinranker123}
+      DB_NAME: asin_ranker
+      DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MAX_CONCURRENT_BROWSERS: ${MAX_CONCURRENT_BROWSERS:-3}
+      MAX_CONCURRENT_TASKS: ${MAX_CONCURRENT_TASKS:-5}
+      PROXY_POOL_ENABLED: ${PROXY_POOL_ENABLED:-false}
+      UA_ROTATION_ENABLED: ${UA_ROTATION_ENABLED:-true}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend/logs:/app/logs
+      - playwright-cache:/root/.cache/ms-playwright
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - asin-ranker-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+    container_name: asin-ranker-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      - backend
+    networks:
+      - asin-ranker-network
+
+networks:
+  asin-ranker-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  playwright-cache:
+    driver: local
