@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeout
+from playwright_stealth import stealth_async
 
 from backend.config import settings
 from backend.core.ua_rotator import get_ua_rotator
@@ -134,17 +135,28 @@ class AmazonCrawler:
         
         # 等待搜索结果加载
         try:
-            await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=10000)
+            await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=15000)
         except PlaywrightTimeout:
             logger.warning("搜索结果加载超时")
             return CrawlResult(
-                keyword="",  # 由调用者设置
+                keyword="",
                 status="error",
                 error="搜索结果加载超时"
             )
         
+        # 检查是否被重定向到验证码页面
+        current_url = page.url
+        if 'captcha' in current_url.lower() or 'validation' in current_url.lower():
+            logger.warning("检测到验证码重定向")
+            return CrawlResult(
+                keyword="",
+                status="captcha",
+                error="检测到验证码"
+            )
+        
         # 获取所有搜索结果
         results = await page.query_selector_all('[data-component-type="s-search-result"]')
+        logger.info(f"找到 {len(results)} 个搜索结果")
         
         organic_page = None
         organic_position = None
@@ -165,16 +177,15 @@ class AmazonCrawler:
                             asin_attr = href.split('/dp/')[1].split('/')[0].split('?')[0].upper()
                 
                 if asin_attr and asin_attr.upper() == asin_upper:
-                    # 计算位置（假设每页 48 个结果）
                     organic_position = idx + 1
-                    organic_page = 1  # 当前页
-                    logger.info(f"找到自然排名：第{organic_page}页，位置{organic_position}")
+                    organic_page = 1
+                    logger.info(f"✓ 找到自然排名：第{organic_page}页，位置{organic_position}, ASIN={asin_attr}")
                     break
             except Exception as e:
                 logger.debug(f"解析结果项失败：{e}")
                 continue
         
-        # 查找广告排名（ Sponsored ）
+        # 查找广告排名
         try:
             sponsored_results = await page.query_selector_all('[data-component-type="s-search-result"][data-ad-sponsored="true"]')
             for idx, ad in enumerate(sponsored_results):
@@ -182,7 +193,7 @@ class AmazonCrawler:
                 if asin_attr and asin_attr.upper() == asin_upper:
                     ad_position = idx + 1
                     ad_page = 1
-                    logger.info(f"找到广告排名：第{ad_page}页，位置{ad_position}")
+                    logger.info(f"✓ 找到广告排名：第{ad_page}页，位置{ad_position}")
                     break
         except Exception as e:
             logger.debug(f"查找广告排名失败：{e}")
@@ -198,7 +209,7 @@ class AmazonCrawler:
             status = "not_found"
         
         return CrawlResult(
-            keyword="",  # 由调用者设置
+            keyword="",
             organic_page=organic_page,
             organic_position=organic_position,
             ad_page=ad_page,
@@ -239,13 +250,21 @@ class AmazonCrawler:
                             '--disable-blink-features=AutomationControlled',
                             '--no-sandbox',
                             '--disable-dev-shm-usage',
+                            '--disable-gpu',
+                            '--disable-extensions',
+                            '--disable-software-rasterizer',
+                            '--disable-setuid-sandbox',
                         ]
                     )
                     
-                    context = await self._create_browser_context()
+                    context = await self._create_browser_context(use_proxy=False)
+                    page = None
                     
                     try:
                         page = await context.new_page()
+                        
+                        # 应用 stealth 反检测
+                        await stealth_async(page)
                         
                         # 遍历页面
                         for page_num in range(1, max_pages + 1):
@@ -254,8 +273,8 @@ class AmazonCrawler:
                             
                             # 访问页面
                             try:
-                                await page.goto(url, wait_until='domcontentloaded', timeout=settings.PAGE_TIMEOUT)
-                                await self.random_delay(1, 2)  # 页面加载后延迟
+                                await page.goto(url, wait_until='networkidle', timeout=60000)
+                                await self.random_delay(2, 4)  # 页面加载后延迟
                             except PlaywrightTimeout:
                                 logger.warning(f"页面加载超时：{url}")
                                 result.status = "error"
@@ -272,6 +291,13 @@ class AmazonCrawler:
                             # 解析排名
                             page_result = await self._parse_rankings(page, asin, max_pages)
                             
+                            # 检查是否有错误
+                            if page_result.status == "error":
+                                result.status = "error"
+                                result.error = page_result.error
+                                break
+                            
+                            # 检查是否找到排名
                             if page_result.organic_position or page_result.ad_position:
                                 # 找到排名
                                 result.organic_page = page_result.organic_page
@@ -281,19 +307,46 @@ class AmazonCrawler:
                                 result.status = page_result.status
                                 break
                             
+                            # 如果已经是最后一页且没找到，设置为 not_found
+                            if page_num >= max_pages:
+                                result.status = "not_found"
+                                break
+                            
                             # 随机延迟后继续下一页
                             if page_num < max_pages:
                                 await self.random_delay()
-                        
+                    
+                    except Exception as e:
+                        logger.error(f"爬取异常：{keyword}, 错误：{e}")
+                        result.status = "error"
+                        result.error = str(e)
+                    
                     finally:
-                        await context.close()
-                        await self.browser.close()
-                        self.browser = None
-            
+                        # 清理资源
+                        if page:
+                            try:
+                                await page.close()
+                            except Exception:
+                                pass
+                        if context:
+                            try:
+                                await context.close()
+                            except Exception:
+                                pass
+                
             except Exception as e:
                 logger.error(f"爬取失败：{keyword}, 错误：{e}")
                 result.status = "error"
                 result.error = str(e)
+            
+            finally:
+                # 确保浏览器关闭
+                if self.browser:
+                    try:
+                        await self.browser.close()
+                    except Exception:
+                        pass
+                self.browser = None
             
             return result
     

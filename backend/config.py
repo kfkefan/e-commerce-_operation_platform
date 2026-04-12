@@ -4,7 +4,8 @@
 """
 import os
 from typing import List, Optional
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -95,10 +96,11 @@ class Settings(BaseSettings):
             "amazon.com.au": {"domain": "amazon.com.au", "tld": "com.au", "language": "en_AU"},
         }
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True
+    )
 
 
 # 全局配置实例
