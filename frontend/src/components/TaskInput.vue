@@ -37,16 +37,84 @@
         </el-select>
       </el-form-item>
       
-      <!-- 最大翻页数 -->
-      <el-form-item label="最大翻页数" prop="maxPages">
-        <el-input-number
-          v-model="form.maxPages"
-          :min="1"
-          :max="50"
-          :step="1"
-          controls-position="right"
-          style="width: 100%"
-        />
+      <!-- 高级配置一行三列 -->
+      <el-form-item label="高级配置">
+        <el-row :gutter="16">
+          <!-- 最大翻页数 -->
+          <el-col :span="8">
+            <el-form-item prop="maxPages" style="margin-bottom: 0">
+              <template #label>
+                <span style="font-size: 14px">最大翻页数</span>
+              </template>
+              <el-select
+                v-model="form.maxPages"
+                placeholder="请选择"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="num in 50"
+                  :key="num"
+                  :label="`${num} 页`"
+                  :value="num"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          
+          <!-- 并发数 -->
+          <el-col :span="8">
+            <el-form-item prop="maxConcurrent" style="margin-bottom: 0">
+              <template #label>
+                <span style="font-size: 14px">并发数</span>
+              </template>
+              <el-select
+                v-model="form.maxConcurrent"
+                placeholder="请选择"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="num in 10"
+                  :key="num"
+                  :label="`${num} 个任务`"
+                  :value="num"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          
+          <!-- 最大重试 -->
+          <el-col :span="8">
+            <el-form-item prop="maxRetries" style="margin-bottom: 0">
+              <template #label>
+                <span style="font-size: 14px">最大重试</span>
+              </template>
+              <el-select
+                v-model="form.maxRetries"
+                placeholder="请选择"
+                style="width: 100%"
+              >
+                <el-option label="不重试" :value="0" />
+                <el-option
+                  v-for="num in 5"
+                  :key="num"
+                  :label="`${num} 次`"
+                  :value="num"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form-item>
+      
+      <!-- 仅自然结果 -->
+      <el-form-item label="爬取范围" prop="organicOnly">
+        <el-radio-group v-model="form.organicOnly">
+          <el-radio :label="false">自然结果 + 广告</el-radio>
+          <el-radio :label="true">仅自然结果</el-radio>
+        </el-radio-group>
+        <div class="form-tip">
+          选择"仅自然结果"将跳过广告排名
+        </div>
       </el-form-item>
       
       <!-- 关键词输入 -->
@@ -99,6 +167,9 @@ const form = reactive<TaskCreateRequest>({
   site: 'amazon.com',
   maxPages: 5,
   keywords: [],
+  maxConcurrent: 3,
+  organicOnly: false,
+  maxRetries: 2,
 });
 
 // 关键词文本输入
@@ -214,5 +285,12 @@ const handleSubmit = async () => {
   margin-top: 8px;
   font-size: 12px;
   color: #909399;
+}
+
+.form-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
 }
 </style>

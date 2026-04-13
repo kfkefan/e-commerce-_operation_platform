@@ -32,6 +32,17 @@ class Task(Base):
     completed_at = Column(DateTime, nullable=True, comment='完成时间')
     error_message = Column(Text, nullable=True, comment='错误信息')
     
+    # 重试相关字段
+    retry_count = Column(Integer, nullable=False, default=0, comment='当前重试次数')
+    max_retries = Column(Integer, nullable=False, default=2, comment='最大重试次数')
+    fail_reason = Column(Text, nullable=True, comment='失败原因')
+    next_retry_at = Column(DateTime, nullable=True, comment='下次重试时间')
+    original_task_id = Column(String(36), nullable=True, comment='原始任务 ID (用于手动重试)')
+    
+    # 爬虫配置
+    max_concurrent = Column(Integer, nullable=False, default=3, comment='最大并发数')
+    organic_only = Column(Integer, nullable=False, default=0, comment='仅爬取自然结果 (0/1)')
+    
     # 关系
     keywords = relationship("TaskKeyword", back_populates="task", cascade="all, delete-orphan")
     results = relationship("TaskResult", back_populates="task", cascade="all, delete-orphan")
@@ -42,6 +53,7 @@ class Task(Base):
         Index('idx_tasks_created_at', 'created_at', mysql_length=19),
         Index('idx_tasks_status_created', 'status', 'created_at', mysql_length=19),
         Index('idx_tasks_asin', 'asin'),
+        Index('idx_tasks_retry', 'status', 'next_retry_at', mysql_length=19),
     )
 
 

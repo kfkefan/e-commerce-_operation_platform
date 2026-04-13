@@ -26,6 +26,9 @@ export interface TaskCreateRequest {
   keywords: string[];
   maxPages?: number;
   site?: string;
+  maxConcurrent?: number;
+  organicOnly?: boolean;
+  maxRetries?: number;
 }
 
 // ========== 响应模型 ==========
@@ -50,6 +53,13 @@ export interface TaskDetail {
   processedKeywords: number;
   progress: number;
   errorMessage?: string | null;
+  retryCount?: number;
+  maxRetries?: number;
+  failReason?: string | null;
+  nextRetryAt?: string | null;
+  canRetry?: boolean;
+  maxConcurrent?: number;
+  organicOnly?: boolean;
 }
 
 export interface TaskListItem {
@@ -59,6 +69,8 @@ export interface TaskListItem {
   completedAt?: string | null;
   totalKeywords: number;
   processedKeywords: number;
+  retryCount?: number;
+  canRetry?: boolean;
 }
 
 export interface Pagination {

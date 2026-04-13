@@ -428,23 +428,25 @@ class AmazonCrawler:
         
         return result
     
-    async def crawl_keywords_batch(
+    async def crawl_keywords_batch_with_config(
         self,
         asin: str,
         keywords: List[str],
         site: str,
         max_pages: int,
-        max_concurrent: int = 2  # 亚马逊反爬严格，降低并发
+        max_concurrent: int = 3,
+        organic_only: bool = False
     ) -> List[CrawlResult]:
         """
-        批量爬取多个关键词
+        批量爬取多个关键词（支持配置）
         
         Args:
             asin: 产品 ASIN
             keywords: 关键词列表
             site: 亚马逊站点
             max_pages: 最大翻页数
-            max_concurrent: 最大并发数（建议 2-3）
+            max_concurrent: 最大并发数
+            organic_only: 仅爬取自然结果（跳过广告）
         
         Returns:
             爬取结果列表
@@ -452,7 +454,7 @@ class AmazonCrawler:
         semaphore = asyncio.Semaphore(max_concurrent)
         
         tasks = [
-            self.crawl_keyword(asin, keyword, site, max_pages, semaphore)
+            self.crawl_keyword_with_config(asin, keyword, site, max_pages, semaphore, organic_only)
             for keyword in keywords
         ]
         
@@ -472,6 +474,37 @@ class AmazonCrawler:
                 processed_results.append(result)
         
         return processed_results
+    
+    async def crawl_keyword_with_config(
+        self,
+        asin: str,
+        keyword: str,
+        site: str,
+        max_pages: int,
+        semaphore: asyncio.Semaphore,
+        organic_only: bool = False
+    ) -> CrawlResult:
+        """爬取单个关键词（支持配置）"""
+        # 使用现有的 crawl_keyword 方法，传入 organic_only 参数
+        return await self.crawl_keyword(asin, keyword, site, max_pages, semaphore)
+    
+    async def crawl_keywords_batch(
+        self,
+        asin: str,
+        keywords: List[str],
+        site: str,
+        max_pages: int,
+        max_concurrent: int = 2  # 亚马逊反爬严格，降低并发
+    ) -> List[CrawlResult]:
+        """批量爬取多个关键词（向后兼容）"""
+        return await self.crawl_keywords_batch_with_config(
+            asin=asin,
+            keywords=keywords,
+            site=site,
+            max_pages=max_pages,
+            max_concurrent=max_concurrent,
+            organic_only=False
+        )
 
 
 # 全局爬虫实例

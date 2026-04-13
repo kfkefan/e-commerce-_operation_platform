@@ -3,23 +3,48 @@
     <template #header>
       <div class="card-header">
         <span>排名结果</span>
-        <el-button
-          type="primary"
-          size="small"
-          @click="handleExport"
-        >
-          导出 CSV
-        </el-button>
+        <div class="header-actions">
+          <!-- 筛选 -->
+          <el-select
+            v-model="filterStatus"
+            placeholder="按状态筛选"
+            clearable
+            size="small"
+            style="width: 150px; margin-right: 10px;"
+            @change="handleFilter"
+          >
+            <el-option label="全部状态" value="" />
+            <el-option label="已找到" value="found" />
+            <el-option label="仅自然未找到" value="organic_not_found" />
+            <el-option label="仅广告未找到" value="ad_not_found" />
+            <el-option label="未找到" value="not_found" />
+            <el-option label="错误" value="error" />
+            <el-option label="验证码" value="captcha" />
+          </el-select>
+          
+          <!-- 导出按钮 -->
+          <el-button
+            type="success"
+            size="small"
+            :disabled="results.length === 0"
+            @click="handleExport"
+          >
+            <el-icon><Download /></el-icon>
+            导出 CSV
+          </el-button>
+        </div>
       </div>
     </template>
     
+    <!-- 结果表格 -->
     <el-table
-      :data="results"
+      :data="filteredResults"
       style="width: 100%"
       border
       stripe
       :default-sort="{ prop: 'keyword', order: 'ascending' }"
-      v-loading="props.loading"
+      v-loading="loading"
+      :height="Math.min(results.length * 55 + 60, 500)"
     >
       <!-- 关键词 -->
       <el-table-column
@@ -28,33 +53,49 @@
         sortable
         min-width="200"
         show-overflow-tooltip
-      />
+      >
+        <template #default="{ row }">
+          <span class="keyword-text">{{ row.keyword }}</span>
+        </template>
+      </el-table-column>
       
       <!-- 自然排名 -->
       <el-table-column
         label="自然排名"
-        width="120"
+        width="140"
         align="center"
+        sortable
+        :sort-method="sortNaturalRank"
       >
         <template #default="{ row }">
           <span v-if="row.organicPage && row.organicPosition" class="rank-found">
-            第{{ row.organicPage }}页 - 第{{ row.organicPosition }}位
+            <el-tag type="success" size="small">
+              第{{ row.organicPage }}页 - 第{{ row.organicPosition }}位
+            </el-tag>
           </span>
-          <span v-else class="rank-not-found">未找到</span>
+          <span v-else class="rank-not-found">
+            <el-tag type="info" size="small">未找到</el-tag>
+          </span>
         </template>
       </el-table-column>
       
       <!-- 广告排名 -->
       <el-table-column
         label="广告排名"
-        width="120"
+        width="140"
         align="center"
+        sortable
+        :sort-method="sortAdRank"
       >
         <template #default="{ row }">
           <span v-if="row.adPage && row.adPosition" class="rank-found">
-            第{{ row.adPage }}页 - 第{{ row.adPosition }}位
+            <el-tag type="warning" size="small">
+              第{{ row.adPage }}页 - 第{{ row.adPosition }}位
+            </el-tag>
           </span>
-          <span v-else class="rank-not-found">未找到</span>
+          <span v-else class="rank-not-found">
+            <el-tag type="info" size="small">未找到</el-tag>
+          </span>
         </template>
       </el-table-column>
       
@@ -62,11 +103,12 @@
       <el-table-column
         prop="status"
         label="状态"
-        width="150"
+        width="120"
         align="center"
+        sortable
       >
         <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)">
+          <el-tag :type="getStatusType(row.status)" size="small">
             {{ getStatusText(row.status) }}
           </el-tag>
         </template>
@@ -76,12 +118,12 @@
       <el-table-column
         prop="timestamp"
         label="爬取时间"
-        width="180"
+        width="160"
         sortable
         align="center"
       >
         <template #default="{ row }">
-          {{ formatDate(row.timestamp) }}
+          <span class="timestamp-text">{{ formatDate(row.timestamp) }}</span>
         </template>
       </el-table-column>
     </el-table>
@@ -126,6 +168,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { Download } from '@element-plus/icons-vue';
 import type { RankingResult } from '../types';
 import { ElMessage } from 'element-plus';
 
@@ -135,7 +178,42 @@ const props = defineProps<{
   loading?: boolean;
 }>();
 
-// 使用 props 的 loading，不要覆盖
+// 筛选状态
+const filterStatus = ref('');
+const filteredResults = ref<RankingResult[]>([]);
+
+// 初始化筛选结果
+filteredResults.value = props.results;
+
+// 监听结果变化
+import { watch } from 'vue';
+watch(() => props.results, (newResults) => {
+  filteredResults.value = newResults;
+  handleFilter();
+}, { immediate: true });
+
+// 处理筛选
+const handleFilter = () => {
+  if (!filterStatus.value) {
+    filteredResults.value = props.results;
+  } else {
+    filteredResults.value = props.results.filter(r => r.status === filterStatus.value);
+  }
+};
+
+// 自然排名排序
+const sortNaturalRank = (a: RankingResult, b: RankingResult) => {
+  const aRank = a.organicPage && a.organicPosition ? (a.organicPage * 1000 + a.organicPosition) : 999999;
+  const bRank = b.organicPage && b.organicPosition ? (b.organicPage * 1000 + b.organicPosition) : 999999;
+  return aRank - bRank;
+};
+
+// 广告排名排序
+const sortAdRank = (a: RankingResult, b: RankingResult) => {
+  const aRank = a.adPage && a.adPosition ? (a.adPage * 1000 + a.adPosition) : 999999;
+  const bRank = b.adPage && b.adPosition ? (b.adPage * 1000 + b.adPosition) : 999999;
+  return aRank - bRank;
+};
 
 // 统计信息
 const stats = computed(() => {
@@ -221,21 +299,21 @@ const formatDate = (dateString: string) => {
 
 // 导出 CSV
 const handleExport = () => {
-  if (props.results.length === 0) {
+  if (filteredResults.value.length === 0) {
     ElMessage.warning('没有数据可导出');
     return;
   }
   
-  // 构建 CSV 内容
+  // 构建 CSV 内容（带 BOM 防止中文乱码）
   const headers = ['关键词', '自然排名页', '自然排名位置', '广告排名页', '广告排名位置', '状态', '爬取时间'];
-  const rows = props.results.map((r) => [
+  const rows = filteredResults.value.map((r) => [
     r.keyword,
-    r.organicPage || '',
-    r.organicPosition || '',
-    r.adPage || '',
-    r.adPosition || '',
-    r.status,
-    r.timestamp,
+    r.organicPage?.toString() || '',
+    r.organicPosition?.toString() || '',
+    r.adPage?.toString() || '',
+    r.adPosition?.toString() || '',
+    getStatusText(r.status),
+    formatDate(r.timestamp),
   ]);
   
   // 转换为 CSV 格式
@@ -244,20 +322,21 @@ const handleExport = () => {
     ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
   ].join('\n');
   
-  // 创建下载链接
+  // 添加 BOM 防止中文乱码
   const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
   
   link.setAttribute('href', url);
-  link.setAttribute('download', `asin_ranker_results_${new Date().getTime()}.csv`);
+  link.setAttribute('download', `ASIN 排名结果_${new Date().getTime()}.csv`);
   link.style.visibility = 'hidden';
   
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(url);
   
-  ElMessage.success('导出成功');
+  ElMessage.success(`已导出 ${filteredResults.value.length} 条记录`);
 };
 </script>
 
@@ -270,15 +349,32 @@ const handleExport = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.keyword-text {
+  font-weight: 500;
+  color: #303133;
 }
 
 .rank-found {
-  color: #67c23a;
   font-weight: 500;
 }
 
 .rank-not-found {
   color: #909399;
+}
+
+.timestamp-text {
+  font-size: 13px;
+  color: #606266;
 }
 
 .statistics {

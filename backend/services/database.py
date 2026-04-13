@@ -147,14 +147,20 @@ async def create_task(
     asin: str,
     site: str,
     max_pages: int,
-    total_keywords: int
+    total_keywords: int,
+    max_concurrent: int = 3,
+    organic_only: bool = False,
+    max_retries: int = 2,
+    original_task_id: Optional[str] = None
 ) -> None:
     """创建新任务"""
     query = """
-        INSERT INTO tasks (id, asin, site, max_pages, status, total_keywords)
-        VALUES (%s, %s, %s, %s, 'pending', %s)
+        INSERT INTO tasks (id, asin, site, max_pages, status, total_keywords, 
+                          max_concurrent, organic_only, max_retries, original_task_id)
+        VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s)
     """
-    await db_pool.execute(query, (task_id, asin, site, max_pages, total_keywords))
+    await db_pool.execute(query, (task_id, asin, site, max_pages, total_keywords, 
+                                  max_concurrent, 1 if organic_only else 0, max_retries, original_task_id))
 
 
 async def create_keywords(task_id: str, keywords: List[str]) -> None:
@@ -175,7 +181,9 @@ async def get_task(task_id: str) -> Optional[Dict[str, Any]]:
     query = """
         SELECT 
             id, asin, site, max_pages, status, total_keywords,
-            processed_keywords, created_at, updated_at, completed_at, error_message
+            processed_keywords, created_at, updated_at, completed_at, error_message,
+            retry_count, max_retries, fail_reason, next_retry_at, original_task_id,
+            max_concurrent, organic_only
         FROM tasks
         WHERE id = %s
     """
@@ -184,19 +192,29 @@ async def get_task(task_id: str) -> Optional[Dict[str, Any]]:
 
 async def get_task_list(
     status: Optional[str] = None,
+    asin: Optional[str] = None,
     page: int = 1,
     page_size: int = 20
 ) -> Dict[str, Any]:
-    """获取任务列表"""
+    """获取任务列表（支持按状态和 ASIN 筛选）"""
     offset = (page - 1) * page_size
     
-    # 构建查询
-    where_clause = ""
+    # 构建 WHERE 子句
+    where_conditions = []
     params = []
     
     if status:
-        where_clause = "WHERE status = %s"
+        where_conditions.append("status = %s")
         params.append(status)
+    
+    if asin:
+        where_conditions.append("asin = %s")
+        params.append(asin)
+    
+    # 组合 WHERE 子句
+    where_clause = ""
+    if where_conditions:
+        where_clause = "WHERE " + " AND ".join(where_conditions)
     
     # 查询总数
     count_query = f"SELECT COUNT(*) as total FROM tasks {where_clause}"
@@ -207,7 +225,8 @@ async def get_task_list(
     query = f"""
         SELECT 
             id, asin, site, status, total_keywords, processed_keywords,
-            created_at, completed_at
+            created_at, completed_at, retry_count,
+            CASE WHEN retry_count < max_retries AND status = 'failed' THEN 1 ELSE 0 END as can_retry
         FROM tasks
         {where_clause}
         ORDER BY created_at DESC
@@ -308,12 +327,70 @@ async def get_task_results(task_id: str) -> List[Dict[str, Any]]:
     return await db_pool.execute(query, (task_id,), fetchall=True) or []
 
 
+# ========== 重试相关操作 ==========
+
+async def set_task_retrying(
+    task_id: str,
+    fail_reason: str,
+    next_retry_at: datetime,
+    retry_count: int
+) -> None:
+    """设置任务为等待重试状态"""
+    query = """
+        UPDATE tasks 
+        SET status = 'retrying', 
+            fail_reason = %s, 
+            next_retry_at = %s,
+            retry_count = %s,
+            updated_at = %s
+        WHERE id = %s
+    """
+    await db_pool.execute(query, (fail_reason, next_retry_at, retry_count, datetime.utcnow(), task_id))
+
+
+async def get_retryable_tasks() -> List[Dict[str, Any]]:
+    """获取所有可重试的任务（已到重试时间）"""
+    query = """
+        SELECT 
+            id, asin, site, max_pages, status, total_keywords,
+            processed_keywords, retry_count, max_retries, fail_reason,
+            max_concurrent, organic_only
+        FROM tasks
+        WHERE status = 'retrying' 
+          AND next_retry_at <= %s
+          AND retry_count < max_retries
+        ORDER BY next_retry_at ASC
+    """
+    return await db_pool.execute(query, (datetime.utcnow(),), fetchall=True) or []
+
+
+async def get_failed_keywords(task_id: str) -> List[str]:
+    """获取任务中失败的关键词列表"""
+    query = """
+        SELECT keyword FROM task_results
+        WHERE task_id = %s AND status = 'error'
+        ORDER BY created_at ASC
+    """
+    results = await db_pool.execute(query, (task_id,), fetchall=True)
+    return [row['keyword'] for row in results] if results else []
+
+
+async def check_result_exists(task_id: str, keyword: str) -> bool:
+    """检查某个关键词的结果是否已存在"""
+    query = """
+        SELECT COUNT(*) as cnt FROM task_results
+        WHERE task_id = %s AND keyword = %s
+    """
+    result = await db_pool.execute(query, (task_id, keyword), fetch=True)
+    return result['cnt'] > 0 if result else False
+
+
 async def cancel_task(task_id: str) -> bool:
-    """取消任务（仅支持 pending 或 running 状态）"""
+    """取消任务（支持 retrying 状态）"""
     query = """
         UPDATE tasks 
         SET status = 'cancelled', updated_at = %s, completed_at = %s
-        WHERE id = %s AND status IN ('pending', 'running')
+        WHERE id = %s AND status IN ('pending', 'running', 'retrying')
     """
     now = datetime.utcnow()
     result = await db_pool.execute(query, (now, now, task_id))

@@ -41,12 +41,35 @@ class RankFinder:
         """清理取消的任务"""
         self._cancelled_tasks.discard(task_id)
     
-    async def process_task(self, task_id: str) -> None:
+    def _map_status(self, crawl_status: str) -> RankingStatus:
+        """映射爬取状态到排名状态"""
+        mapping = {
+            'found': RankingStatus.FOUND,
+            'organic_not_found': RankingStatus.ORGANIC_NOT_FOUND,
+            'ad_not_found': RankingStatus.AD_NOT_FOUND,
+            'not_found': RankingStatus.NOT_FOUND,
+            'error': RankingStatus.ERROR,
+            'captcha': RankingStatus.CAPTCHA,
+        }
+        return mapping.get(crawl_status, RankingStatus.ERROR)
+    
+    async def process_task_with_config(
+        self,
+        task_id: str,
+        keywords: List[str],
+        max_concurrent: int = 3,
+        organic_only: bool = False,
+        is_retry: bool = False
+    ) -> None:
         """
-        处理单个任务
+        处理单个任务（支持配置）
         
         Args:
             task_id: 任务 ID
+            keywords: 关键词列表
+            max_concurrent: 最大并发数
+            organic_only: 仅爬取自然结果
+            is_retry: 是否为重试任务
         """
         try:
             # 获取任务信息
@@ -55,28 +78,14 @@ class RankFinder:
                 logger.error(f"任务不存在：{task_id}")
                 return
             
-            # 检查任务状态
-            if task['status'] not in ['pending', 'running']:
-                logger.warning(f"任务状态不允许执行：{task_id}, status={task['status']}")
-                return
-            
-            # 更新为运行中
-            await update_task_status(task_id, TaskStatus.RUNNING)
-            logger.info(f"任务开始执行：{task_id}")
-            
-            # 获取关键词
-            keywords = await get_task_keywords(task_id)
-            if not keywords:
-                logger.warning(f"任务没有关键词：{task_id}")
-                await update_task_status(task_id, TaskStatus.COMPLETED)
-                return
-            
             asin = task['asin']
             site = task['site']
             max_pages = task['max_pages']
             
+            logger.info(f"任务执行配置：并发={max_concurrent}, 仅自然={organic_only}, 重试={is_retry}")
+            
             # 分批处理关键词
-            batch_size = settings.MAX_CONCURRENT_BROWSERS
+            batch_size = max_concurrent
             total_keywords = len(keywords)
             
             for i in range(0, total_keywords, batch_size):
@@ -90,12 +99,13 @@ class RankFinder:
                 logger.info(f"处理关键词批次 {i//batch_size + 1}: {len(batch)} 个关键词")
                 
                 # 爬取批次
-                results = await self.crawler.crawl_keywords_batch(
+                results = await self.crawler.crawl_keywords_batch_with_config(
                     asin=asin,
                     keywords=batch,
                     site=site,
                     max_pages=max_pages,
-                    max_concurrent=batch_size
+                    max_concurrent=batch_size,
+                    organic_only=organic_only
                 )
                 
                 # 保存结果
@@ -125,23 +135,44 @@ class RankFinder:
         
         except Exception as e:
             logger.error(f"任务执行失败：{task_id}, 错误：{e}")
-            await update_task_status(task_id, TaskStatus.FAILED, str(e))
+            raise  # 抛出异常让 task_service 处理重试
         
         finally:
             # 清理
             self.cleanup_task(task_id)
     
-    def _map_status(self, crawl_status: str) -> RankingStatus:
-        """映射爬取状态到排名状态"""
-        mapping = {
-            'found': RankingStatus.FOUND,
-            'organic_not_found': RankingStatus.ORGANIC_NOT_FOUND,
-            'ad_not_found': RankingStatus.AD_NOT_FOUND,
-            'not_found': RankingStatus.NOT_FOUND,
-            'error': RankingStatus.ERROR,
-            'captcha': RankingStatus.CAPTCHA,
-        }
-        return mapping.get(crawl_status, RankingStatus.ERROR)
+    async def process_task(self, task_id: str) -> None:
+        """处理单个任务（向后兼容）"""
+        # 获取任务信息
+        task = await get_task(task_id)
+        if not task:
+            logger.error(f"任务不存在：{task_id}")
+            return
+        
+        # 检查任务状态
+        if task['status'] not in ['pending', 'running']:
+            logger.warning(f"任务状态不允许执行：{task_id}, status={task['status']}")
+            return
+        
+        # 更新为运行中
+        await update_task_status(task_id, TaskStatus.RUNNING)
+        logger.info(f"任务开始执行：{task_id}")
+        
+        # 获取关键词
+        keywords = await get_task_keywords(task_id)
+        if not keywords:
+            logger.warning(f"任务没有关键词：{task_id}")
+            await update_task_status(task_id, TaskStatus.COMPLETED)
+            return
+        
+        # 使用默认配置执行
+        await self.process_task_with_config(
+            task_id=task_id,
+            keywords=keywords,
+            max_concurrent=settings.MAX_CONCURRENT_BROWSERS,
+            organic_only=False,
+            is_retry=False
+        )
 
 
 # 全局排名查找器实例

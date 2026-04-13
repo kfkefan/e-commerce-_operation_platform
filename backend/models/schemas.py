@@ -17,6 +17,7 @@ class TaskStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    RETRYING = "retrying"  # 等待自动重试
 
 
 class RankingStatus(str, Enum):
@@ -37,6 +38,9 @@ class TaskCreateRequest(BaseModel):
     keywords: List[str] = Field(..., description="关键词列表", min_items=1, max_items=100)
     maxPages: int = Field(default=5, description="最大翻页数", ge=1, le=50)
     site: str = Field(default="amazon.com", description="亚马逊站点")
+    maxConcurrent: int = Field(default=3, description="最大并发数", ge=1, le=10)
+    organicOnly: bool = Field(default=False, description="仅爬取自然结果（跳过广告）")
+    maxRetries: int = Field(default=2, description="最大重试次数", ge=0, le=5)
     
     @field_validator('asin')
     @classmethod
@@ -100,6 +104,17 @@ class TaskDetail(BaseModel):
     progress: int = Field(..., description="进度百分比（0-100）")
     errorMessage: Optional[str] = Field(None, description="错误信息")
     
+    # 重试相关
+    retryCount: int = Field(default=0, description="当前重试次数")
+    maxRetries: int = Field(default=2, description="最大重试次数")
+    failReason: Optional[str] = Field(None, description="失败原因")
+    nextRetryAt: Optional[datetime] = Field(None, description="下次重试时间")
+    canRetry: bool = Field(default=False, description="是否可以手动重试")
+    
+    # 爬虫配置
+    maxConcurrent: int = Field(default=3, description="最大并发数")
+    organicOnly: bool = Field(default=False, description="仅爬取自然结果")
+    
     class Config:
         from_attributes = True
 
@@ -112,6 +127,8 @@ class TaskListItem(BaseModel):
     completedAt: Optional[datetime] = Field(None, description="完成时间")
     totalKeywords: int = Field(..., description="关键词总数")
     processedKeywords: int = Field(..., description="已处理关键词数")
+    retryCount: int = Field(default=0, description="重试次数")
+    canRetry: bool = Field(default=False, description="是否可以重试")
     
     class Config:
         from_attributes = True

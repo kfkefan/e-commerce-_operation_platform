@@ -96,6 +96,22 @@ export async function getTaskResults(taskId: string): Promise<TaskResultsRespons
 }
 
 /**
+ * 重试任务
+ */
+export async function retryTask(taskId: string): Promise<TaskResponse> {
+  const response = await apiClient.post<TaskResponse>(`/tasks/${taskId}/retry`);
+  return response.data;
+}
+
+/**
+ * 放弃任务
+ */
+export async function abandonTask(taskId: string): Promise<TaskResponse> {
+  const response = await apiClient.post<TaskResponse>(`/tasks/${taskId}/abandon`);
+  return response.data;
+}
+
+/**
  * 健康检查
  */
 export async function healthCheck(): Promise<{
