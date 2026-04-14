@@ -1,8 +1,8 @@
 <template>
   <div class="home-page">
     <el-row :gutter="20" class="content-row">
-      <!-- 左侧：任务输入和进度 -->
-      <el-col :span="12" :xs="24" :sm="24" :md="12" class="left-col">
+      <!-- 左侧：任务输入和进度 (1/4 宽度) -->
+      <el-col :span="6" :xs="24" :sm="24" :md="6" class="left-col">
         <!-- 任务输入组件 -->
         <TaskInput 
           @submitted="handleTaskSubmitted" 
@@ -27,8 +27,8 @@
         />
       </el-col>
       
-      <!-- 右侧：任务列表和结果 -->
-      <el-col :span="12" :xs="24" :sm="24" :md="12" class="right-col">
+      <!-- 右侧：任务列表和结果 (3/4 宽度) -->
+      <el-col :span="18" :xs="24" :sm="24" :md="18" class="right-col">
         <!-- 任务结果 -->
         <ResultTable
           v-if="showResults && currentResults"
