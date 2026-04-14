@@ -96,6 +96,10 @@ app.add_middleware(
 app.include_router(tasks.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 
+# ========== WebSocket 路由 ==========
+from backend.routers.websocket import websocket_router
+app.include_router(websocket_router, prefix="/ws")
+
 
 # ========== 根路径 ==========
 

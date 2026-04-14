@@ -94,6 +94,9 @@ class TaskService:
         
         logger.info(f"任务创建成功：{task_id}, ASIN: {request.asin}, 关键词数：{len(request.keywords)}")
         
+        # ✅ 新增：立即通知前端任务状态为 PENDING
+        await self.notify_task_status_change(task_id, TaskStatus.PENDING)
+        
         # 异步启动任务
         asyncio.create_task(self._execute_task(task_id))
         
@@ -285,6 +288,8 @@ class TaskService:
             
             tasks.append({
                 'taskId': task['id'],
+                'asin': task['asin'],  # ✅ 添加 ASIN 字段
+                'site': task['site'],  # ✅ 添加站点字段
                 'status': task['status'],
                 'createdAt': task['created_at'],
                 'completedAt': task.get('completed_at'),
@@ -353,6 +358,31 @@ class TaskService:
             'results': formatted_results,
         }
     
+    async def notify_task_status_change(self, task_id: str, status: TaskStatus):
+        """
+        通知前端任务状态变化（通过 WebSocket 推送）
+        """
+        from backend.routers.websocket import push_to_all_clients
+        
+        # 获取当前任务进度信息
+        task = await get_task(task_id)
+        
+        message = {
+            "type": "task_status_update",
+            "task_id": task_id,
+            "status": status.value
+        }
+        
+        # 如果有任务信息，添加进度数据
+        if task:
+            message["processed_keywords"] = task.get('processed_keywords', 0)
+            message["total_keywords"] = task.get('total_keywords', 0)
+        
+        # 推送到所有连接的客户端
+        await push_to_all_clients(message)
+        
+        logger.info(f"WebSocket 消息已发送 - task_id: {task_id}, status: {status.value}")
+        
     def get_active_task_count(self) -> int:
         """获取活跃任务数"""
         return len(self._active_tasks)

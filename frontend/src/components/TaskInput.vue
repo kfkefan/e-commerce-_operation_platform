@@ -155,7 +155,8 @@ import type { TaskCreateRequest } from '../types';
 
 // 定义 emits
 const emit = defineEmits<{
-  (e: 'submitted', taskId: string): void;
+  (e: 'submitted', taskId: string, keywords: string[]): void; // 新增关键词参数
+  (e: 'refresh-history'): void; // 新增：通知刷新历史列表
 }>();
 
 // 表单引用
@@ -252,7 +253,12 @@ const handleSubmit = async () => {
     try {
       const response = await createTask(form);
       ElMessage.success('任务提交成功！');
-      emit('submitted', response.taskId);
+      
+      // 立即通知刷新历史列表
+      emit('refresh-history');
+      
+      // 然后更新当前任务视图（同时传递关键词）
+      emit('submitted', response.taskId, [...form.keywords]);
       
       // 重置表单
       form.asin = '';

@@ -4,7 +4,10 @@
       <!-- 左侧：任务输入和进度 -->
       <el-col :span="12" :xs="24" :sm="24" :md="12" class="left-col">
         <!-- 任务输入组件 -->
-        <TaskInput @submitted="handleTaskSubmitted" />
+        <TaskInput 
+          @submitted="handleTaskSubmitted" 
+          @refresh-history="refreshHistoryList"
+        />
         
         <!-- 任务进度组件 -->
         <TaskProgress
@@ -35,6 +38,7 @@
         
         <!-- 历史任务列表 -->
         <TaskHistory
+          :refresh-trigger="historyRefreshTrigger"
           @view-results="handleViewResultsFromHistory"
           @retry-task="handleTaskRetried"
           @select-task="handleSelectTask"
@@ -52,7 +56,7 @@ import TaskProgress from '../components/TaskProgress.vue';
 import ResultTable from '../components/ResultTable.vue';
 import TaskHistory from '../components/TaskHistory.vue';
 import TrendAnalysis from '../components/TrendAnalysis.vue';
-import { getTaskDetail, getTaskResults } from '../api/tasks';
+import { getTaskDetail, getTaskResults, getTaskList } from '../api/tasks';
 import type { TaskDetail, TaskListItem, RankingResult } from '../types';
 
 // 当前任务
@@ -66,9 +70,50 @@ const showResults = ref(false);
 // 趋势图
 const showTrend = ref(false);
 
+// 当前关键词列表（用于预置结果）
+const currentKeywords = ref<string[]>([]);
+
+// 历史列表刷新触发器
+const historyRefreshTrigger = ref(0);
+
+// 页面初始化时加载最近完成的任务
+onMounted(async () => {
+  await loadLatestCompletedTask();
+});
+
+// 刷新历史列表
+const refreshHistoryList = () => {
+  historyRefreshTrigger.value += 1;
+};
+
 // 处理任务提交
-const handleTaskSubmitted = async (taskId: string) => {
+const handleTaskSubmitted = async (taskId: string, keywords?: string[]) => {
   await loadTaskDetail(taskId);
+  
+  // 如果有关键词，立即创建预制结果
+  if (keywords && keywords.length > 0) {
+    createPresetResults(keywords);
+  }
+};
+
+// 创建预制结果（任务刚开始时显示）
+const createPresetResults = (keywords: string[]) => {
+  currentKeywords.value = keywords;
+  
+  // 为每个关键词创建占位数据
+  const presetResults: RankingResult[] = keywords.map(keyword => ({
+    keyword,
+    organicPage: null,
+    organicPosition: null,
+    adPage: null,
+    adPosition: null,
+    status: 'pending' as any, // 待爬取状态
+    timestamp: new Date().toISOString(),
+  }));
+  
+  currentResults.value = presetResults;
+  showResults.value = true;
+  loadingResults.value = false;
 };
 
 // 加载任务详情
@@ -90,6 +135,12 @@ const loadTaskDetail = async (taskId: string) => {
 const refreshCurrentTask = async () => {
   if (currentTask.value) {
     await loadTaskDetail(currentTask.value.taskId);
+    
+    // 如果任务完成了，自动加载结果
+    if (currentTask.value.status === 'completed') {
+      await loadTaskResults(currentTask.value.taskId);
+      showResults.value = true;
+    }
   }
 };
 
@@ -139,6 +190,33 @@ const loadTaskResults = async (taskId: string) => {
   } catch (error: any) {
     ElMessage.error('加载任务结果失败：' + (error.message || '未知错误'));
     loadingResults.value = false;
+  }
+};
+
+// 加载最近完成的任务
+const loadLatestCompletedTask = async () => {
+  try {
+    // 获取最近的任务列表（只取第一个）
+    const response = await getTaskList({ page: 1, pageSize: 1 });
+    const tasks = response.tasks;
+    
+    if (tasks && tasks.length > 0) {
+      const latestTask = tasks[0];
+      
+      // 如果最近任务是已完成状态，显示它的结果
+      if (latestTask.status === 'completed') {
+        await loadTaskDetail(latestTask.taskId);
+        await loadTaskResults(latestTask.taskId);
+        showTrend.value = true;
+      } else {
+        // 否则只显示任务详情（进度等），但不显示结果
+        await loadTaskDetail(latestTask.taskId);
+        showTrend.value = true;
+      }
+    }
+  } catch (error) {
+    console.log('加载最近任务失败:', error);
+    // 失败不报错，静默处理
   }
 };
 </script>

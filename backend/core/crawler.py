@@ -78,6 +78,73 @@ class AmazonCrawler:
         encoded_keyword = quote(keyword)
         return f"{base_url}/s?k={encoded_keyword}&page={page}"
     
+    def _get_random_viewport(self) -> Dict[str, int]:
+        """随机屏幕分辨率"""
+        viewports = [
+            {'width': 1920, 'height': 1080},
+            {'width': 1366, 'height': 768},
+            {'width': 1536, 'height': 864},
+            {'width': 1440, 'height': 900},
+            {'width': 1280, 'height': 720},
+            {'width': 1600, 'height': 900},
+        ]
+        return random.choice(viewports)
+    
+    def _get_random_locale_timezone(self) -> tuple:
+        """随机语言和时区"""
+        locale_timezone = [
+            ('en-US', 'America/New_York'),
+            ('en-US', 'America/Los_Angeles'),
+            ('en-US', 'America/Chicago'),
+            ('en-GB', 'Europe/London'),
+            ('de-DE', 'Europe/Berlin'),
+            ('fr-FR', 'Europe/Paris'),
+            ('ja-JP', 'Asia/Tokyo'),
+        ]
+        return random.choice(locale_timezone)
+    
+    async def _simulate_human_behavior(self, page: Page) -> None:
+        """模拟人类浏览行为"""
+        try:
+            # 随机滚动页面
+            scroll_height = random.randint(100, 500)
+            await page.evaluate(f'window.scrollBy(0, {scroll_height})')
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+            
+            # 随机滚动回来
+            await page.evaluate(f'window.scrollBy(0, -{scroll_height})')
+            await asyncio.sleep(random.uniform(0.3, 0.8))
+            
+            logger.debug("已模拟人类滚动行为")
+        except Exception as e:
+            logger.debug(f"模拟人类行为失败：{e}")
+    
+    async def _handle_captcha(self, page: Page, keyword: str) -> str:
+        """处理验证码"""
+        logger.warning(f"检测到验证码，尝试处理：{keyword}")
+        
+        # 1. 等待一段时间
+        await asyncio.sleep(random.uniform(3, 7))
+        
+        # 2. 尝试刷新页面
+        try:
+            await page.reload(wait_until='domcontentloaded')
+            await asyncio.sleep(random.uniform(2, 4))
+            
+            if not await self._is_captcha(page):
+                logger.info("验证码已解除")
+                return "resolved"
+        except Exception as e:
+            logger.warning(f"刷新页面失败：{e}")
+        
+        # 3. 如果还是验证码，切换代理
+        if self.proxy_pool.is_enabled:
+            current_proxy = self.proxy_pool.get_proxy()
+            self.proxy_pool.mark_failed(current_proxy)
+            logger.info(f"已标记失败代理，切换到新代理")
+        
+        return "failed"
+    
     async def _is_captcha(self, page: Page) -> bool:
         """检测是否遇到验证码"""
         try:
@@ -227,10 +294,11 @@ class AmazonCrawler:
         keyword: str,
         site: str,
         max_pages: int,
-        semaphore: asyncio.Semaphore
+        semaphore: asyncio.Semaphore,
+        retry_count: int = 0
     ) -> CrawlResult:
         """
-        爬取单个关键词的排名 - 增强反爬版本（支持第三方 API）
+        爬取单个关键词的排名 - 增强反爬版本（支持第三方 API + 自动切换站点）
         
         核心反爬策略：
         1. 使用 stealth_async 隐藏自动化特征
@@ -239,6 +307,7 @@ class AmazonCrawler:
         4. 验证码检测与处理
         5. 降低并发避免被封
         6. 支持第三方 API（DataForSEO, SerpApi, ScraperAPI）
+        7. 自动切换站点策略
         """
         async with semaphore:
             result = CrawlResult(keyword=keyword)
@@ -273,8 +342,33 @@ class AmazonCrawler:
                 logger.info(f"第三方 API 失败，回退到本地爬虫：{keyword}")
             
             # ========== 策略 2: 使用本地 Playwright 爬虫 ==========
-            logger.info(f"使用本地爬虫爬取：{keyword}")
-            return await self._crawl_with_playwright(asin, keyword, site, max_pages)
+            logger.info(f"使用本地爬虫爬取：{keyword} (站点：{site}, 重试：{retry_count})")
+            result = await self._crawl_with_playwright(asin, keyword, site, max_pages, retry_count)
+            
+            # ========== 策略 3: 自动切换站点 ==========
+            if result.status == "error" and retry_count < 2:
+                # 如果失败且重试次数未达到上限，尝试切换站点
+                alternative_sites = self._get_alternative_sites(site)
+                for alt_site in alternative_sites:
+                    logger.info(f"当前站点失败，尝试切换站点：{alt_site}")
+                    retry_result = await self._crawl_with_playwright(asin, keyword, alt_site, max_pages, retry_count + 1)
+                    if retry_result.status != "error":
+                        logger.info(f"切换站点成功：{alt_site}")
+                        return retry_result
+                
+                logger.warning(f"所有站点尝试失败：{site} -> {alternative_sites}")
+            
+            return result
+    
+    def _get_alternative_sites(self, current_site: str) -> List[str]:
+        """获取备选站点列表"""
+        all_sites = ["amazon.com", "amazon.co.uk", "amazon.ca", "amazon.com.au"]
+        if current_site in all_sites:
+            all_sites.remove(current_site)
+        # 优先尝试同语言站点
+        if current_site == "amazon.com":
+            return ["amazon.co.uk", "amazon.ca", "amazon.com.au"]
+        return all_sites
     
     async def _crawl_with_third_party(
         self,
@@ -319,8 +413,9 @@ class AmazonCrawler:
         keyword: str,
         site: str,
         max_pages: int,
+        retry_count: int = 0
     ) -> CrawlResult:
-        """使用本地 Playwright 爬虫"""
+        """使用本地 Playwright 爬虫 - 增强版"""
         browser = None
         context = None
         page = None
@@ -340,24 +435,64 @@ class AmazonCrawler:
                         '--no-zygote',
                         '--disable-gpu',
                         '--disable-blink-features=AutomationControlled',
+                        '--disable-web-security',
+                        '--disable-features=IsolateOrigins,site-per-process',
                     ]
                 )
                 
-                # 2. 创建上下文 - 模拟真实用户环境
+                # 2. 创建上下文 - 增强版随机指纹
+                viewport = self._get_random_viewport()
+                ua = self.ua_rotator.get_random_ua()
+                locale, timezone = self._get_random_locale_timezone()
+                
                 context = await browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    locale='en-US',
-                    timezone_id='America/New_York',
+                    viewport=viewport,
+                    user_agent=ua,
+                    locale=locale,
+                    timezone_id=timezone,
                     proxy={"server": self.proxy_pool.get_proxy()} if self.proxy_pool.is_enabled else None,
+                    color_scheme='light',
+                    permissions=['geolocation'],
+                    geolocation={'latitude': 40.7128, 'longitude': -74.0060},  # NYC
                 )
+                
+                # 3. 增强反爬脚本
+                await context.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                    
+                    // 随机化 Canvas 指纹
+                    const original_toDataURL = HTMLCanvasElement.prototype.toDataURL;
+                    HTMLCanvasElement.prototype.toDataURL = function() {
+                        const ctx = this.getContext('2d');
+                        ctx.fillStyle = `rgba(${Math.random()*255}, ${Math.random()*255}, ${Math.random()*255}, 0.1)`;
+                        ctx.fillRect(0, 0, this.width, this.height);
+                        return original_toDataURL.apply(this, arguments);
+                    };
+                    
+                    // 随机化 WebGL 指纹
+                    const getParameter = WebGLRenderingContext.prototype.getParameter;
+                    WebGLRenderingContext.prototype.getParameter = function(param) {
+                        const result = getParameter.call(this, param);
+                        if (param === this.UNMASKED_RENDERER_WEBGL) {
+                            return 'NVIDIA GeForce GTX 1080';
+                        }
+                        return result;
+                    };
+                """)
                 
                 page = await context.new_page()
                 await stealth_async(page)
                 
+                # 4. 启用请求拦截
+                await page.route('**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2}', lambda route: route.abort())
+                
+                logger.info(f"浏览器指纹：UA={ua[:50]}..., 分辨率={viewport['width']}x{viewport['height']}, 时区={timezone}")
+                
                 logger.info(f"开始爬取：{keyword} (ASIN: {asin})")
                 
-                # 3. 遍历页面
+                # 4. 遍历页面
                 for page_num in range(1, max_pages + 1):
                     url = self._build_search_url(site, keyword, page_num)
                     logger.debug(f"爬取：{url}")
@@ -365,6 +500,10 @@ class AmazonCrawler:
                     try:
                         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                         await self.random_delay(2, 4)
+                        
+                        # 模拟人类行为
+                        await self._simulate_human_behavior(page)
+                        
                     except PlaywrightTimeout:
                         logger.warning(f"页面加载超时：{url}")
                         result.status = "error"
@@ -376,11 +515,17 @@ class AmazonCrawler:
                         result.error = str(e)
                         break
                     
+                    # 验证码检测与处理
                     if await self._is_captcha(page):
-                        logger.warning(f"检测到验证码：{keyword}")
-                        result.status = "captcha"
-                        result.error = "检测到验证码"
-                        break
+                        captcha_result = await self._handle_captcha(page, keyword)
+                        if captcha_result == "failed":
+                            logger.warning(f"验证码处理失败：{keyword}")
+                            result.status = "captcha"
+                            result.error = "验证码处理失败"
+                            break
+                        else:
+                            # 验证码已解决，继续
+                            continue
                     
                     page_content = await page.content()
                     if "no results found" in page_content.lower():

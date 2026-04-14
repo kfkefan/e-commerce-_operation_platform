@@ -64,6 +64,8 @@ export interface TaskDetail {
 
 export interface TaskListItem {
   taskId: string;
+  asin: string;  // ✅ 添加 ASIN 字段
+  site: string;  // ✅ 添加站点字段
   status: TaskStatus;
   createdAt: string;
   completedAt?: string | null;
