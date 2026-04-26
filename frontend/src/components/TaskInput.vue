@@ -193,7 +193,13 @@ const rules: FormRules = {
     { required: true, message: '请选择站点', trigger: 'change' },
   ],
   maxPages: [
-    { required: true, message: '请输入翻页数', trigger: 'blur' },
+    { required: true, message: '请选择翻页数', trigger: 'change' },
+  ],
+  maxConcurrent: [
+    { required: true, message: '请选择并发数', trigger: 'change' },
+  ],
+  maxRetries: [
+    { required: true, message: '请选择重试次数', trigger: 'change' },
   ],
   keywords: [
     {

@@ -24,7 +24,7 @@ def setup_logging():
         os.makedirs(log_dir)
     
     logger = logging.getLogger("asin_ranker")
-    logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
+    logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper(), logging.ERROR))
     
     # 文件处理器（轮转）
     file_handler = RotatingFileHandler(
